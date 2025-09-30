@@ -50,6 +50,7 @@ augmentation:
   rotation_range: 15
   brightness_range: [0.8, 1.2]
   zoom_range: 0.1
+  #all augmentations fixed for backbone comparison experiments
 
 logging:
   log_interval: 10
@@ -59,3 +60,12 @@ logging:
 misc:
   num_workers: 2
   pin_memory: true
+
+metrics:
+  - macro_f1
+  - macro_pr_auc
+  - balanced_accuracy
+  - mcc
+  - ece
+  - brier_score
+
