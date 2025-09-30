@@ -38,6 +38,7 @@ training:
 sampler:
   type: class_balanced
   enabled: true
+  beta: 0.9999
 
 
 loss:
