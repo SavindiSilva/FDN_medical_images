@@ -30,6 +30,10 @@ training:
   early_stopping_patience: 10
   optimizer: adamw
   weight_decay: 0.01
+  scheduler:
+    type: step_lr
+    step_size: 10
+    gamma: 0.1
 
 loss:
   type: cross_entropy
