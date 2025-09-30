@@ -6,7 +6,7 @@ paths:
   data: /content/FDN_medical_images/data
   raw: /content/FDN_medical_images/data/raw
   raw_ham10000: /content/FDN_medical_images/data/raw/HAM10000
-  splits: /content/FDN_medical_images/data/HAM10000_data_splits
+  splits: /content/drive/MyDrive/HAM10000_data_splits
   preprocessed: /content/FDN_medical_images/data/preprocessed
   results: /content/FDN_medical_images/results
   logs: /content/FDN_medical_images/results/logs
