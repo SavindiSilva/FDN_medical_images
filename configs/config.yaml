@@ -37,7 +37,7 @@ training:
 
 loss:
   type: cross_entropy
-  class_weights: true
+  class_weights: [1.3018, 0.2134, 12.4410, 1.2855, 10.0755, 2.7835, 4.3753]
 
 augmentation:
   horizontal_flip: true
