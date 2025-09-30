@@ -48,5 +48,5 @@ logging:
   checkpoint_interval: 5
 
 misc:
-  num_workers: 4
+  num_workers: 2
   pin_memory: true
