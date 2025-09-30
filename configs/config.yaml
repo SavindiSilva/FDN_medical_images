@@ -71,3 +71,18 @@ metrics:
   - ece
   - brier_score
 
+train_transforms = A.Compose([
+    A.Resize(224, 224),
+    A.RandomFlip(p=0.5),
+    A.ColorJitter(p=0.3),
+    A.Normalize(mean=(0.5,), std=(0.5,)),
+    ToTensorV2(),
+])
+
+val_transforms = A.Compose([
+    A.Resize(224, 224),
+    A.Normalize(mean=(0.5,), std=(0.5,)),
+    ToTensorV2(),
+])
+
+
