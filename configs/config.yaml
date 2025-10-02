@@ -38,7 +38,7 @@ scheduler:
     
 sampler:
   type: class_balanced
-  enabled: true
+  enabled: false
   beta: 0.9999
 
 
