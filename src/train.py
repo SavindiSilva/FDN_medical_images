@@ -11,7 +11,7 @@ from src.dataset import HAM10000Dataset
 from src.models import get_model
 
 def main():
-    print("INITIALIZING PIPELINE")
+    print("initializing pipeline")
     config = load_config()
     seed_everything(config['seed'])
     

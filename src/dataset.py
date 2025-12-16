@@ -1,23 +1,3 @@
-# import torch
-# from torch.utils.data import Dataset
-
-# class HAM10000Dataset(Dataset):
-#     def __init__(self, csv_file, img_dir, transform=None):
-#         # We will implement the full CSV reading logic later
-#         # For now, this is a placeholder to prove the module works
-#         self.csv_file = csv_file
-#         self.img_dir = img_dir
-#         self.transform = transform
-
-#     def __len__(self):
-#         return 10  # Dummy length for testing
-
-#     def __getitem__(self, idx):
-#         # Create a fake image tensor (3 channels, 224x224)
-#         image = torch.randn(3, 224, 224)
-#         label = 0 # Fake label
-#         return image, label, idx
-
 import os
 import torch
 import pandas as pd
