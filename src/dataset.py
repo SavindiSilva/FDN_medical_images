@@ -7,15 +7,10 @@ from torchvision import transforms
 
 class HAM10000Dataset(Dataset):
     def __init__(self, csv_file, img_dir, transform=None):
-        """
-        Args:
-            csv_file (string): Path to the csv file with annotations.
-            img_dir (string): Directory with all the images.
-            transform (callable, optional): Transform to be applied on a sample.
-        """
+
         self.df = pd.read_csv(csv_file)
         self.img_dir = img_dir
-        self.transform = transform
+        self.transform = transform 
         
         #HAM10000 mapping
         self.label_map = {
@@ -40,7 +35,7 @@ class HAM10000Dataset(Dataset):
             image = Image.open(img_path).convert('RGB')
         except FileNotFoundError:
             print(f"image not found at {img_path}")
-            # Return a black image so training doesn't crash (Robustness)
+            #return a black image so training doesn't crash (robustness)
             image = Image.new('RGB', (224, 224))
         
         #get Label

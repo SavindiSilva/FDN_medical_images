@@ -13,7 +13,7 @@ def main():
     print("calculating class weights")
     
     #load train split
-    train_csv_path = os.path.join("data", "splits", "train_clean.csv")
+    train_csv_path = os.path.join("data", "splits", "train_fold_0.csv")
     
     if not os.path.exists(train_csv_path):
         print(f"error: {train_csv_path} not found")
@@ -29,7 +29,7 @@ def main():
     # formula: n_samples / (n_classes * n_samples_j)
     weights = compute_class_weight(class_weight='balanced', classes=classes, y=y)
     
-    print("\nsuccess Copy this list into config.yaml under 'class_weights':")
+    print("\nsuccess. 'class_weights':")
     print("-" * 50)
     #print formatted list for YAML
     print(f"[{', '.join([f'{w:.4f}' for w in weights])}]")
