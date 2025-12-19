@@ -166,7 +166,7 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"🚀 Training {model_name} on {device} for {epochs} epochs...")
+    print(f" Training {model_name} on {device} for {epochs} epochs...")
     print(f"   Train Data: {train_csv}")
     print(f"   Val Data:   {val_csv}")
 
@@ -228,7 +228,7 @@ def main():
         }])
         log_df.to_csv(log_path, mode='a', header=not os.path.exists(log_path), index=False)
 
-    print("\n✅ Training Complete.")
+    print("\ntraining Complete")
 
 if __name__ == "__main__":
     main()
