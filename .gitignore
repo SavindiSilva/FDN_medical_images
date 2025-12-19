@@ -1,4 +1,6 @@
 data/
+#but keep these specific subfolders
+!data/splits/
 results/
 venv/
 __pycache__/
