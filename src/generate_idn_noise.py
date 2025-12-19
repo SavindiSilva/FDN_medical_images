@@ -15,7 +15,7 @@ sys.path.append(os.getcwd())
 
 from src.dataset import HAM10000Dataset
 from src.models import get_model
-from src.utils import load_config, seed_everything
+from src.utils import load_config, seed_everything 
 
 def train_proxy(model, loader, device, epochs=5):
     """

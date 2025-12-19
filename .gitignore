@@ -1,4 +1,5 @@
-data/
+#ignore everything INSIDE data, but allow entering the folder
+data/*
 #but keep these specific subfolders
 !data/splits/
 results/
