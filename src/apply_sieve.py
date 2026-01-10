@@ -12,7 +12,7 @@ import sys
 
 # Add src to path to import your modules
 sys.path.append('src')
-from dataset import SkinDataset, get_transforms  
+from dataset import HAM10000Dataset, get_transforms  
 from models import build_resnet50
 
 # ================= CONFIGURATION =================
@@ -34,7 +34,7 @@ def apply_sieve():
     df = pd.read_csv(INPUT_CSV)
     
     # Setup Dataset (No Augmentation, just Resize/Normalize for evaluation)
-    dataset = SkinDataset(df, IMAGE_DIR, transform=get_transforms(phase='val'))
+    dataset = HAM10000Dataset(df, IMAGE_DIR, transform=get_transforms(phase='val'))
     loader = DataLoader(dataset, batch_size=64, shuffle=False, num_workers=2)
 
     # Load Model
