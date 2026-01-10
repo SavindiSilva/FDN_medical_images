@@ -20,7 +20,7 @@ from models import get_model
 # ================= CONFIGURATION =================
 # INPUTS
 # Pointing specifically to the folder you just saved
-MODEL_PATH = "/content/drive/My Drive/experiments/diagnostic_prototype_SAVED/diagnostic_epoch_8.pth"
+MODEL_PATH = "/content/drive/My Drive/experiments/diagnostic_prototype_SAVED/checkpoint_epoch_8.pth"
 INPUT_CSV = "/content/drive/My Drive/backbone_selection/train_idn_20.csv"
 IMAGE_DIR = "/content/data/images"
 
