@@ -5,9 +5,28 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 
+def get_transforms(phase='train'):
+    """Standard ImageNet transforms for ResNet50"""
+    mean = [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225]
+
+    if phase == 'train':
+        return transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomRotation(10),
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std)
+        ])
+    else: # val or test
+        return transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std)
+        ])
+
 class HAM10000Dataset(Dataset):
     def __init__(self, csv_file, img_dir, transform=None):
-
         self.df = pd.read_csv(csv_file)
         self.img_dir = img_dir
         self.transform = transform 
@@ -22,29 +41,40 @@ class HAM10000Dataset(Dataset):
         return len(self.df)
 
     def __getitem__(self, idx):
-        #get image Path
-        img_id = self.df.iloc[idx]['image_id']
+        # 1. Get Image Path
+        # Handle cases where column name might vary
+        if 'image_id' in self.df.columns:
+            img_id = self.df.iloc[idx]['image_id']
+        else:
+            img_id = self.df.iloc[idx, 0] # Fallback to first column
 
-        if not img_id.endswith('.jpg'):
-            img_id = img_id + ".jpg"
+        if not str(img_id).endswith('.jpg'):
+            img_id = str(img_id) + ".jpg"
             
         img_path = os.path.join(self.img_dir, img_id)
         
-        #load Image
+        # 2. Load Image
         try:
             image = Image.open(img_path).convert('RGB')
-        except FileNotFoundError:
-            print(f"image not found at {img_path}")
-            #return a black image so training doesn't crash (robustness)
+        except (FileNotFoundError, OSError):
+            # Return black image if missing (prevents crash)
             image = Image.new('RGB', (224, 224))
         
-        #get Label
-        label_str = self.df.iloc[idx]['dx']
-        label = self.label_map.get(label_str, 0) # Default to 0 if error
+        # 3. Get Label
+        if 'dx' in self.df.columns:
+            label_str = self.df.iloc[idx]['dx']
+            label = self.label_map.get(label_str, 0)
+        else:
+            # Fallback for synthetic/clean files that might use numeric labels
+            # Assuming 'label' or 'target' column exists, or it's the 2nd column
+            try:
+                label = int(self.df.iloc[idx]['label']) 
+            except:
+                label = 0 
 
-        #apply Transforms
+        # 4. Apply Transforms
         if self.transform:
             image = self.transform(image)
             
-        #return Index (Critical for Sieve!)
+        # Return 3 items (Image, Label, Index) - Useful for Sieve
         return image, label, idx
