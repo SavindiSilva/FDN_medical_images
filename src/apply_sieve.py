@@ -15,7 +15,7 @@ sys.path.append('src')
 
 # Import the fixed dataset
 from dataset import HAM10000Dataset, get_transforms
-from models import build_resnet50
+from models import get_model as build_resnet50
 
 # ================= CONFIGURATION =================
 # INPUTS
