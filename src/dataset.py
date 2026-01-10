@@ -26,12 +26,23 @@ def get_transforms(phase='train'):
         ])
 
 class HAM10000Dataset(Dataset):
-    def __init__(self, csv_file, img_dir, transform=None):
-        self.df = pd.read_csv(csv_file)
+    def __init__(self, csv_input, img_dir, transform=None):
+        """
+        Args:
+            csv_input (string or pd.DataFrame): Path to the csv file OR a DataFrame.
+            img_dir (string): Directory with all the images.
+            transform (callable, optional): Transform to be applied on a sample.
+        """
+        # --- Handle both String Path AND DataFrame Object ---
+        if isinstance(csv_input, str):
+            self.df = pd.read_csv(csv_input)
+        else:
+            self.df = csv_input
+            
         self.img_dir = img_dir
         self.transform = transform 
         
-        #HAM10000 mapping
+        # HAM10000 mapping
         self.label_map = {
             'nv': 0, 'mel': 1, 'bkl': 2, 'bcc': 3, 
             'akiec': 4, 'vasc': 5, 'df': 6
@@ -42,11 +53,10 @@ class HAM10000Dataset(Dataset):
 
     def __getitem__(self, idx):
         # 1. Get Image Path
-        # Handle cases where column name might vary
         if 'image_id' in self.df.columns:
             img_id = self.df.iloc[idx]['image_id']
         else:
-            img_id = self.df.iloc[idx, 0] # Fallback to first column
+            img_id = self.df.iloc[idx, 0] # Fallback
 
         if not str(img_id).endswith('.jpg'):
             img_id = str(img_id) + ".jpg"
@@ -57,7 +67,6 @@ class HAM10000Dataset(Dataset):
         try:
             image = Image.open(img_path).convert('RGB')
         except (FileNotFoundError, OSError):
-            # Return black image if missing (prevents crash)
             image = Image.new('RGB', (224, 224))
         
         # 3. Get Label
@@ -65,8 +74,6 @@ class HAM10000Dataset(Dataset):
             label_str = self.df.iloc[idx]['dx']
             label = self.label_map.get(label_str, 0)
         else:
-            # Fallback for synthetic/clean files that might use numeric labels
-            # Assuming 'label' or 'target' column exists, or it's the 2nd column
             try:
                 label = int(self.df.iloc[idx]['label']) 
             except:
@@ -76,5 +83,5 @@ class HAM10000Dataset(Dataset):
         if self.transform:
             image = self.transform(image)
             
-        # Return 3 items (Image, Label, Index) - Useful for Sieve
+        # Return 3 items (Image, Label, Index)
         return image, label, idx
