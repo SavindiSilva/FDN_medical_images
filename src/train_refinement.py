@@ -73,7 +73,7 @@ def main():
     parser.add_argument("--image_dir", type=str, required=True)
     parser.add_argument("--output_dir", type=str, default="experiments/Phase6_Refinement")
     parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--debug", action="store_true", help="Run in fast debug mode (100 samples)")
+    parser.add_argument("--debug", action="store_true", help="Run in fast debug mode (1000 samples)")
     args = parser.parse_args()
 
     seed_everything(42)
@@ -93,8 +93,8 @@ def main():
     
     # --- DEBUG MODE (Crucial for CPU) ---
     if args.debug:
-        print(" DEBUG MODE ACTIVE: Training on random 100 samples only.")
-        full_df = full_df.sample(100).reset_index(drop=True)
+        print(" DEBUG MODE ACTIVE: Training on random 1000 samples only.")
+        full_df = full_df.sample(1000).reset_index(drop=True)
 
     dataset = HAM10000Dataset(full_df, args.image_dir, transform=transform)
     loader = DataLoader(dataset, batch_size=16, shuffle=True) 
