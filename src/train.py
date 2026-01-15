@@ -20,11 +20,11 @@ from src.dataset import HAM10000Dataset
 from src.models import get_model
 
 def get_class_weights(csv_path, device):
-    """Calculates weights to handle class imbalance dynamically."""
+    """Calculates "Safe" weights: Boosts rare classes without killing the majority class."""
     print(f"Computing class weights from: {csv_path}")
     df = pd.read_csv(csv_path)
     
-    # Handle label mapping if needed
+    # Handle label mapping
     if 'label' not in df.columns:
         lesion_type_dict = {
             'nv': 0, 'mel': 1, 'bkl': 2, 'bcc': 3, 'akiec': 4, 'vasc': 5, 'df': 6
@@ -34,11 +34,20 @@ def get_class_weights(csv_path, device):
     y = df['label'].values
     classes = np.unique(y)
     
-    # 'balanced' = n_samples / (n_classes * np.bincount(y))
+    # 1. Compute Sklearn Balanced Weights
     weights = compute_class_weight(class_weight='balanced', classes=classes, y=y)
+    
+    # 2. DAMPENING & NORMALIZATION (The Fix)
+    # We take the square root to make the penalty less aggressive
+    weights = np.sqrt(weights)
+    
+    # We normalize so the SMALLEST weight is 1.0 (Training Baseline)
+    # This ensures Class 0 (Nevi) still generates strong enough gradients to learn features
+    weights = weights / np.min(weights)
+    
     weights_tensor = torch.tensor(weights, dtype=torch.float32).to(device)
     
-    print(f"Class Weights: {weights_tensor.cpu().numpy()}")
+    print(f"Safe Class Weights: {weights_tensor.cpu().numpy()}")
     return weights_tensor
 
 def train_one_epoch(model, loader, criterion, optimizer, device):
