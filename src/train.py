@@ -11,6 +11,7 @@ from sklearn.metrics import accuracy_score, matthews_corrcoef, f1_score
 from sklearn.utils.class_weight import compute_class_weight
 from torch.utils.data import DataLoader
 from torchvision import transforms
+from torch.utils.data import WeightedRandomSampler
 
 # Add project root to path
 sys.path.append(os.getcwd())
@@ -133,13 +134,12 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f" Training {model_name} on {device} for {epochs} epochs...")
-    print(f"   Train Data: {train_csv}")
 
-    # 3. Data Setup
+    # 3. Data Setup & SAMPLER
     train_transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.RandomHorizontalFlip(),
-        transforms.RandomVerticalFlip(), # Added for extra robustness
+        transforms.RandomVerticalFlip(),
         transforms.RandomRotation(15),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
@@ -153,16 +153,36 @@ def main():
     train_dataset = HAM10000Dataset(train_csv, image_dir, transform=train_transform)
     val_dataset = HAM10000Dataset(val_csv, image_dir, transform=val_transform)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
+    # --- NEW: Create Weighted Sampler ---
+    print("Building Weighted Random Sampler to fix imbalance...")
+    
+    # 1. Load DF to get labels
+    df = pd.read_csv(train_csv)
+    # Ensure map
+    if 'label' not in df.columns:
+        lesion_type_dict = {'nv':0, 'mel':1, 'bkl':2, 'bcc':3, 'akiec':4, 'vasc':5, 'df':6}
+        df['label'] = df['dx'].map(lesion_type_dict)
+    
+    y_train = df['label'].values
+    class_sample_count = np.array([len(np.where(y_train == t)[0]) for t in np.unique(y_train)])
+    
+    # Weight = 1 / count (Rare classes get huge weights)
+    weight = 1. / class_sample_count
+    samples_weight = np.array([weight[t] for t in y_train])
+    samples_weight = torch.from_numpy(samples_weight)
+    
+    sampler = WeightedRandomSampler(samples_weight.type('torch.DoubleTensor'), len(samples_weight))
+    
+    # Note: shuffle=False is REQUIRED when using a sampler
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=sampler, shuffle=False, num_workers=2)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
 
     # 4. Model & Loss
     model = get_model(model_name, num_classes=7).to(device)
     
-    # --- FIX: Compute Dynamic Class Weights ---
-    # This prevents the "Mode Collapse" (MCC=0)
-    class_weights = get_class_weights(train_csv, device)
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    # --- CRITICAL: Remove Class Weights ---
+    # The Sampler handles the balance now. Double-weighting would be bad.
+    criterion = nn.CrossEntropyLoss() 
     
     optimizer = optim.AdamW(model.parameters(), lr=config['training']['learning_rate'])
     
