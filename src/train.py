@@ -121,6 +121,8 @@ def main():
         df['label'] = df['dx'].map(lesion_type_dict)
     
     y_train = df['label'].values
+    # class_counts = np.bincount(y_train)
+    y_train = y_train.astype(int) 
     class_counts = np.bincount(y_train)
     class_weights = 1. / class_counts
     sample_weights = class_weights[y_train]
