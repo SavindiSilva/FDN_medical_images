@@ -17,6 +17,27 @@ sys.path.append(os.getcwd())
 from src.dataset import HAM10000Dataset
 from src.utils import seed_everything
 
+def get_class_weights(dataset, device):
+    """Calculates inverse class weights to handle imbalance."""
+    if hasattr(dataset, 'df'):
+        y = dataset.df['label'].values
+    else:
+        y = [label for _, label, _ in dataset]
+    
+    y = np.array(y).astype(int)
+    counts = np.bincount(y, minlength=7)
+    counts = np.maximum(counts, 1) # Avoid div by zero
+    
+    # Weights = Total / (Num_Classes * Count) is a standard formula
+    # Or simple Inverse: 1/Count
+    weights = 1.0 / counts
+    weights = weights / weights.sum() * 7  # Normalize
+    
+    print(f" Class Counts: {counts}")
+    print(f" Weights: {np.round(weights, 2)}")
+    
+    return torch.FloatTensor(weights).to(device)
+
 def train_one_epoch(model, loader, criterion, optimizer, device):
     model.train()
     running_loss = 0.0
@@ -76,7 +97,7 @@ def main():
     parser.add_argument("--image_dir", type=str, required=True)
     parser.add_argument("--epochs", type=int, default=15)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--output_dir", type=str, default="experiments/Phase6_Unfrozen")
+    parser.add_argument("--output_dir", type=str, default="experiments/Phase6_Hybrid")
     args = parser.parse_args()
 
     seed_everything(42)
@@ -107,23 +128,27 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=2)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
 
-    # --- MODEL (UNFROZEN) ---
-    print(" Loading ResNet50 (UNFROZEN)...")
-    # Weights=DEFAULT gives the best ImageNet weights available
+    # --- WEIGHTS ---
+    weights_tensor = get_class_weights(train_dataset, device)
+
+    # --- MODEL ---
+    print(" Loading ResNet50...")
     model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
     
-    # We do NOT freeze the parameters. We let them all train.
-    
+    # Start FROZEN
+    print(" Freezing Backbone for warmup...")
+    for param in model.parameters():
+        param.requires_grad = False
+        
     num_ftrs = model.fc.in_features
-    model.fc = nn.Linear(num_ftrs, 7)
+    model.fc = nn.Linear(num_ftrs, 7) # New head is trainable by default
     model = model.to(device)
 
-    # --- LOSS & OPTIMIZER ---
-    # No class weights needed (Data is balanced now)
-    criterion = nn.CrossEntropyLoss()
+    # Loss with Weights
+    criterion = nn.CrossEntropyLoss(weight=weights_tensor)
     
-    # Lower Learning Rate (1e-4) is safe for Unfrozen training
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
+    # Optimizer (Init for Head only first)
+    optimizer = optim.Adam(model.fc.parameters(), lr=1e-3)
 
     # --- LOOP ---
     best_mcc = -1.0
@@ -131,6 +156,15 @@ def main():
     for epoch in range(args.epochs):
         print(f"\n--- Epoch {epoch+1}/{args.epochs} ---")
         
+        # --- AUTO UNFREEZE AT EPOCH 4 ---
+        if epoch == 3: # (0,1,2 are frozen. 3 is 4th epoch)
+            print(" Unfreezing Backbone! Lowering LR...")
+            for param in model.parameters():
+                param.requires_grad = True
+            
+            # Re-create optimizer for ALL parameters with lower LR
+            optimizer = optim.Adam(model.parameters(), lr=1e-5) # Very safe LR
+            
         train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
         val_loss, val_acc, val_mcc, val_f1 = validate(model, val_loader, criterion, device)
         
