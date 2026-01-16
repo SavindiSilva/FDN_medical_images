@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from sklearn.metrics import accuracy_score, matthews_corrcoef, f1_score
-from torch.utils.data import DataLoader, WeightedRandomSampler
+from torch.utils.data import DataLoader
 from torchvision import transforms, models
 
 # Add project root to path
@@ -33,15 +33,15 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
         loss.backward()
         optimizer.step()
 
-        running_loss += loss.item()
+        running_loss += loss.item() * images.size(0)  # Correct loss accumulation
         
-        preds = torch.argmax(outputs, dim=1).cpu().numpy()
-        all_preds.extend(preds)
+        _, preds = torch.max(outputs, 1) # Get class indices
+        all_preds.extend(preds.cpu().numpy())
         all_labels.extend(labels.cpu().numpy())
         
         loop.set_description(f"Loss: {loss.item():.4f}")
 
-    epoch_loss = running_loss / len(loader)
+    epoch_loss = running_loss / len(loader.dataset) # Correct average
     epoch_acc = accuracy_score(all_labels, all_preds)
     return epoch_loss, epoch_acc
 
@@ -57,14 +57,14 @@ def validate(model, loader, criterion, device):
             
             outputs = model(images)
             loss = criterion(outputs, labels)
-            running_loss += loss.item()
+            running_loss += loss.item() * images.size(0)
 
-            preds = torch.argmax(outputs, dim=1).cpu().numpy()
+            _, preds = torch.max(outputs, 1)
             
-            all_preds.extend(preds)
+            all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
 
-    epoch_loss = running_loss / len(loader)
+    epoch_loss = running_loss / len(loader.dataset)
     epoch_acc = accuracy_score(all_labels, all_preds)
     epoch_mcc = matthews_corrcoef(all_labels, all_preds)
     epoch_f1 = f1_score(all_labels, all_preds, average='macro')
@@ -74,27 +74,27 @@ def validate(model, loader, criterion, device):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, default="resnet50")
-    parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--epochs", type=int, default=15)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--csv_file", type=str, default=None)
-    parser.add_argument("--image_dir", type=str, default=None)
-    parser.add_argument("--output_dir", type=str, default="results")
+    parser.add_argument("--csv_file", type=str, required=True)
+    parser.add_argument("--image_dir", type=str, required=True)
+    parser.add_argument("--output_dir", type=str, default="experiments/Phase6_Balanced")
     args = parser.parse_args()
 
     # Load Config (for seed only)
-    config = load_config()
-    seed_everything(config['seed'])
+    # config = load_config() # Optional if you don't use config file
+    seed_everything(42)
     
     train_csv = args.csv_file
-    val_csv = os.path.join("data", "splits", "val_fold_0.csv")
+    val_csv = "data/splits/val_fold_0.csv"
     image_dir = args.image_dir
-    output_dir = os.path.join(args.output_dir, args.model_name)
+    output_dir = args.output_dir
     os.makedirs(output_dir, exist_ok=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f" Training {args.model_name} (Pretrained) on {device}...")
+    print(f" Training {args.model_name} on {device}...")
 
-    # --- DATA & SAMPLER ---
+    # --- DATA AUGMENTATION ---
     train_transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.RandomHorizontalFlip(),
@@ -110,40 +110,26 @@ def main():
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
+    print(f" Loading Data from {train_csv}...")
     train_dataset = HAM10000Dataset(train_csv, image_dir, transform=train_transform)
     val_dataset = HAM10000Dataset(val_csv, image_dir, transform=val_transform)
 
-    # Calculate Weights for Sampler
-    print("Building Weighted Random Sampler...")
-    df = pd.read_csv(train_csv)
-    if 'label' not in df.columns:
-        lesion_type_dict = {'nv':0, 'mel':1, 'bkl':2, 'bcc':3, 'akiec':4, 'vasc':5, 'df':6}
-        df['label'] = df['dx'].map(lesion_type_dict)
-    
-    y_train = df['label'].values
-    # class_counts = np.bincount(y_train)
-    y_train = y_train.astype(int) 
-    class_counts = np.bincount(y_train)
-    class_weights = 1. / class_counts
-    sample_weights = class_weights[y_train]
-    sampler = WeightedRandomSampler(torch.from_numpy(sample_weights), len(sample_weights))
-
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, sampler=sampler, num_workers=2)
+    # --- IMPORTANT: Standard Shuffle (No Weighted Sampler) ---
+    # We already balanced the data in the CSV, so simple shuffling is best.
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=2)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
 
-    # --- MODEL (FORCE PRETRAINED) ---
-    print("Loading Pretrained ResNet50 Weights...")
+    # --- MODEL ---
+    print(" Loading Pretrained ResNet50...")
     model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
-    
-    # Replace Head
     num_ftrs = model.fc.in_features
     model.fc = nn.Linear(num_ftrs, 7)
     model = model.to(device)
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=1e-4) # Safe LR for pretrained
+    optimizer = optim.Adam(model.parameters(), lr=1e-4) # Slightly higher LR for faster convergence
 
-    # --- LOOP ---
+    # --- TRAINING LOOP ---
     best_mcc = -1.0
     
     for epoch in range(args.epochs):
@@ -160,14 +146,15 @@ def main():
             torch.save(model.state_dict(), os.path.join(output_dir, "best_model.pth"))
             print(f"🌟 New Best Model Saved! (MCC: {val_mcc:.4f})")
             
-        # CSV Log
+        # Log to CSV
         log_df = pd.DataFrame([{
             'epoch': epoch+1, 'train_loss': train_loss, 'train_acc': train_acc,
             'val_loss': val_loss, 'val_acc': val_acc, 'val_mcc': val_mcc
         }])
-        log_df.to_csv(os.path.join(output_dir, "log.csv"), mode='a', header=not os.path.exists(os.path.join(output_dir, "log.csv")), index=False)
+        log_file = os.path.join(output_dir, "log.csv")
+        log_df.to_csv(log_file, mode='a', header=not os.path.exists(log_file), index=False)
 
-    print("\nTraining Complete")
+    print("\n Training Complete")
 
 if __name__ == "__main__":
     main()
