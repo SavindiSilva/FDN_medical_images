@@ -17,27 +17,6 @@ sys.path.append(os.getcwd())
 from src.dataset import HAM10000Dataset
 from src.utils import seed_everything
 
-def get_class_weights(dataset, device):
-    """Calculates inverse class weights to handle imbalance."""
-    if hasattr(dataset, 'df'):
-        y = dataset.df['label'].values
-    else:
-        y = [label for _, label, _ in dataset]
-    
-    y = np.array(y).astype(int)
-    counts = np.bincount(y, minlength=7)
-    counts = np.maximum(counts, 1) # Avoid div by zero
-    
-    # Weights = Total / (Num_Classes * Count) is a standard formula
-    # Or simple Inverse: 1/Count
-    weights = 1.0 / counts
-    weights = weights / weights.sum() * 7  # Normalize
-    
-    print(f" Class Counts: {counts}")
-    print(f" Weights: {np.round(weights, 2)}")
-    
-    return torch.FloatTensor(weights).to(device)
-
 def train_one_epoch(model, loader, criterion, optimizer, device):
     model.train()
     running_loss = 0.0
@@ -97,7 +76,7 @@ def main():
     parser.add_argument("--image_dir", type=str, required=True)
     parser.add_argument("--epochs", type=int, default=15)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--output_dir", type=str, default="experiments/Phase6_Hybrid")
+    parser.add_argument("--output_dir", type=str, default="experiments/Phase6_Gentle")
     args = parser.parse_args()
 
     seed_everything(42)
@@ -105,13 +84,12 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f" Training on {device}...")
 
-    # --- DATA ---
+    # --- DATA (Simplified Augmentation) ---
     train_transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.RandomHorizontalFlip(),
         transforms.RandomVerticalFlip(),
-        transforms.RandomRotation(20),
-        transforms.ColorJitter(brightness=0.1, contrast=0.1),
+        # Removed ColorJitter to make initial learning easier
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
@@ -128,27 +106,20 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=2)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
 
-    # --- WEIGHTS ---
-    weights_tensor = get_class_weights(train_dataset, device)
-
-    # --- MODEL ---
-    print(" Loading ResNet50...")
+    # --- MODEL (UNFROZEN) ---
+    print(" Loading ResNet50 (Unfrozen)...")
     model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
     
-    # Start FROZEN
-    print(" Freezing Backbone for warmup...")
-    for param in model.parameters():
-        param.requires_grad = False
-        
     num_ftrs = model.fc.in_features
-    model.fc = nn.Linear(num_ftrs, 7) # New head is trainable by default
+    model.fc = nn.Linear(num_ftrs, 7)
     model = model.to(device)
 
-    # Loss with Weights
-    criterion = nn.CrossEntropyLoss(weight=weights_tensor)
+    # --- LOSS & OPTIMIZER ---
+    # REMOVED Class Weights (Data is already balanced enough)
+    criterion = nn.CrossEntropyLoss()
     
-    # Optimizer (Init for Head only first)
-    optimizer = optim.Adam(model.fc.parameters(), lr=1e-3)
+    # Very Low Learning Rate for stability
+    optimizer = optim.Adam(model.parameters(), lr=1e-5)
 
     # --- LOOP ---
     best_mcc = -1.0
@@ -156,15 +127,6 @@ def main():
     for epoch in range(args.epochs):
         print(f"\n--- Epoch {epoch+1}/{args.epochs} ---")
         
-        # --- AUTO UNFREEZE AT EPOCH 4 ---
-        if epoch == 3: # (0,1,2 are frozen. 3 is 4th epoch)
-            print(" Unfreezing Backbone! Lowering LR...")
-            for param in model.parameters():
-                param.requires_grad = True
-            
-            # Re-create optimizer for ALL parameters with lower LR
-            optimizer = optim.Adam(model.parameters(), lr=1e-5) # Very safe LR
-            
         train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
         val_loss, val_acc, val_mcc, val_f1 = validate(model, val_loader, criterion, device)
         
