@@ -76,7 +76,7 @@ def main():
     parser.add_argument("--image_dir", type=str, required=True)
     parser.add_argument("--epochs", type=int, default=15)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--output_dir", type=str, default="experiments/Phase6_Balanced")
+    parser.add_argument("--output_dir", type=str, default="experiments/Phase6_Unfrozen")
     args = parser.parse_args()
 
     seed_everything(42)
@@ -107,45 +107,23 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=2)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
 
-    # --- CALCULATE CLASS WEIGHTS ---
-    print(" Calculating Class Weights...")
-    # Extract labels to compute weights
-    if hasattr(train_dataset, 'df'):
-        y_train = train_dataset.df['label'].values
-    else:
-        y_train = [label for _, label, _ in train_dataset]
-    
-    y_train = np.array(y_train).astype(int)
-    class_counts = np.bincount(y_train, minlength=7)
-    
-    # Inverse Frequency Weights
-    # If a class is rare (low count), it gets a HIGH weight.
-    weights = 1.0 / np.maximum(class_counts, 1) 
-    weights = weights / weights.sum() * 7  # Normalize
-    
-    weights_tensor = torch.FloatTensor(weights).to(device)
-    print(f"   Counts:  {class_counts}")
-    print(f"   Weights: {np.round(weights, 2)}")
-
-    # --- MODEL ---
-    print(" Loading ResNet50 and FREEZING backbone...")
+    # --- MODEL (UNFROZEN) ---
+    print(" Loading ResNet50 (UNFROZEN)...")
+    # Weights=DEFAULT gives the best ImageNet weights available
     model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
-
-    # 1. FREEZE ALL LAYERS FIRST
-    for param in model.parameters():
-        param.requires_grad = False
-
-    # 2. REPLACE HEAD (New layers are automatically trainable)
+    
+    # We do NOT freeze the parameters. We let them all train.
+    
     num_ftrs = model.fc.in_features
     model.fc = nn.Linear(num_ftrs, 7)
     model = model.to(device)
 
-    # CRITICAL: Pass weights to Loss Function
-    criterion = nn.CrossEntropyLoss(weight=weights_tensor)
+    # --- LOSS & OPTIMIZER ---
+    # No class weights needed (Data is balanced now)
+    criterion = nn.CrossEntropyLoss()
     
-    # 3. OPTIMIZER: Only train the Head (model.fc)
-    # Increased LR to 1e-3 because we are training a fresh layer
-    optimizer = optim.Adam(model.fc.parameters(), lr=1e-3)
+    # Lower Learning Rate (1e-4) is safe for Unfrozen training
+    optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
     # --- LOOP ---
     best_mcc = -1.0
