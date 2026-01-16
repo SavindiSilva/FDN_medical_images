@@ -128,13 +128,24 @@ def main():
     print(f"   Weights: {np.round(weights, 2)}")
 
     # --- MODEL ---
+    print(" Loading ResNet50 and FREEZING backbone...")
     model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
-    model.fc = nn.Linear(model.fc.in_features, 7)
+
+    # 1. FREEZE ALL LAYERS FIRST
+    for param in model.parameters():
+        param.requires_grad = False
+
+    # 2. REPLACE HEAD (New layers are automatically trainable)
+    num_ftrs = model.fc.in_features
+    model.fc = nn.Linear(num_ftrs, 7)
     model = model.to(device)
 
     # CRITICAL: Pass weights to Loss Function
     criterion = nn.CrossEntropyLoss(weight=weights_tensor)
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
+    
+    # 3. OPTIMIZER: Only train the Head (model.fc)
+    # Increased LR to 1e-3 because we are training a fresh layer
+    optimizer = optim.Adam(model.fc.parameters(), lr=1e-3)
 
     # --- LOOP ---
     best_mcc = -1.0
