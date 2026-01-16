@@ -10,9 +10,9 @@ from torchvision import transforms, models
 from torch.utils.data import DataLoader
 from dataset import HAM10000Dataset
 
-# CONFIG
-# Point to the Best Model saved during training
-MODEL_PATH = "experiments/Phase6_Fixed/best_model.pth" 
+# --- CONFIG UPDATE ---
+# Pointing to the Phase 7 Curriculum Model
+MODEL_PATH = "experiments/Phase7_Curriculum/best_model_curriculum.pth"
 IMG_DIR = "/content/final_images"
 VAL_CSV = "data/splits/val_fold_0.csv"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -20,6 +20,10 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def evaluate():
     print(f" Evaluating model from: {MODEL_PATH}")
     
+    if not os.path.exists(MODEL_PATH):
+        print(" Error: Model file not found. Did Phase 7 finish saving?")
+        return
+
     # 1. Load Data
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
@@ -31,7 +35,7 @@ def evaluate():
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
     
     # 2. Load Model Structure
-    model = models.resnet50(weights=None) # No weights needed, we load our own
+    model = models.resnet50(weights=None) 
     model.fc = nn.Linear(model.fc.in_features, 7)
     
     # 3. Load Trained Weights
@@ -57,17 +61,7 @@ def evaluate():
     # 5. Generate Report
     classes = ['nv', 'mel', 'bkl', 'bcc', 'akiec', 'vasc', 'df']
     
-    # Confusion Matrix
-    cm = confusion_matrix(all_labels, all_preds)
-    plt.figure(figsize=(10, 8))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=classes, yticklabels=classes)
-    plt.xlabel('Predicted')
-    plt.ylabel('Actual')
-    plt.title('Confusion Matrix - Phase 6')
-    plt.show()
-    
-    # Classification Report
-    print("\n Classification Report:\n")
+    print("\n Classification Report (Phase 7 - Curriculum):\n")
     print(classification_report(all_labels, all_preds, target_names=classes))
 
 if __name__ == "__main__":
