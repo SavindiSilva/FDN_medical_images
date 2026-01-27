@@ -10,7 +10,7 @@ import copy
 
 # Import your modules
 from dataset import HAM10000Dataset
-from models import get_backbone
+from models import get_model
 from ema import EMA
 from utils import set_seed
 
@@ -106,7 +106,7 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=2)
 
     # 2. Initialize Student (Load Phase 7 weights)
-    student = get_backbone("resnet50", num_classes=7).to(device)
+    student = get_model("resnet50", num_classes=7).to(device)
     checkpoint = torch.load(args.checkpoint, map_location=device)
     
     # Handle state dict keys if needed
