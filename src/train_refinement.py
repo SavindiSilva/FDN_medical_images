@@ -1,123 +1,154 @@
-import argparse
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
+import torch.optim as optim
 from torch.utils.data import DataLoader
-from torchvision import transforms
-import pandas as pd
-import os
-import sys
 from tqdm import tqdm
+import os
+import argparse
+import copy
 
-sys.path.append('src')
+# Import your modules
 from dataset import HAM10000Dataset
-from models import get_model
-from utils import seed_everything
-from ema import EMA 
+from models import get_backbone
+from ema import EMA
+from utils import set_seed
 
-# --- CONFIG ---
-TEACHER_DECAY = 0.999
-SUSPECT_WEIGHT = 0.5 
-
-def train_one_epoch(student, teacher_ema, loader, optimizer, clean_ids, device):
+def train_one_epoch(student, teacher, ema, loader, optimizer, device, consistency_weight=0.1):
     student.train()
-    total_loss = 0
-    criterion_ce = nn.CrossEntropyLoss()
-    criterion_kl = nn.KLDivLoss(reduction='batchmean')
+    teacher.eval() # Teacher is always in eval mode
     
-    loop = tqdm(loader, leave=False)
-    for images, labels, image_ids in loop:
+    running_loss = 0.0
+    correct = 0
+    total = 0
+    
+    loop = tqdm(loader, desc="[TEACHER-STUDENT]", leave=False)
+    
+    for images, labels, _ in loop:
         images, labels = images.to(device), labels.to(device)
         
-        # FIX: Ensure IDs are strings and stripped of whitespace for matching
-        # Check if the image_id is in the clean set
-        is_clean = torch.tensor([str(uid).strip() in clean_ids for uid in image_ids], device=device)
+        # 1. Student Forward Pass
+        student_logits = student(images)
         
-        loss = torch.tensor(0.0, device=device)
-        
-        # A: CLEAN SAMPLES (Standard Label) -> Should generate NON-ZERO loss
-        if is_clean.any():
-            loss += criterion_ce(student_logits[is_clean], labels[is_clean])
-        
-        # B: SUSPECT SAMPLES (Teacher Refinement) -> Generates 0 loss at start (Normal)
-        if (~is_clean).any():
-            # 1. Student Forward Pass
-            student_logits = student(images)
-
-            suspect_images = images[~is_clean]
-            with torch.no_grad():
-                teacher_ema.apply_shadow() 
-                teacher_logits = teacher_ema.model(suspect_images)
-                teacher_ema.restore()
+        # 2. Teacher Forward Pass (No Grad)
+        with torch.no_grad():
+            teacher.logits = teacher(images)
             
-            loss += SUSPECT_WEIGHT * criterion_kl(
-                F.log_softmax(student_logits[~is_clean], dim=1), 
-                F.softmax(teacher_logits, dim=1)
-            )
-
+        # 3. Supervised Loss (Student vs Real Labels)
+        cls_loss = F.cross_entropy(student_logits, labels)
+        
+        # 4. Consistency Loss (Student vs Teacher)
+        # KL Divergence: aligns student probability distribution with teacher's
+        student_log_softmax = F.log_softmax(student_logits, dim=1)
+        teacher_softmax = F.softmax(teacher.logits, dim=1)
+        const_loss = F.kl_div(student_log_softmax, teacher_softmax, reduction='batchmean')
+        
+        # Total Loss
+        loss = cls_loss + (consistency_weight * const_loss)
+        
+        # Backprop
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        teacher_ema.update()
         
-        total_loss += loss.item()
-        loop.set_description(f"Loss: {loss.item():.4f}")
+        # Update Teacher (EMA)
+        ema.update(student)
+        
+        # Metrics
+        running_loss += loss.item()
+        _, preds = torch.max(student_logits, 1)
+        correct += (preds == labels).sum().item()
+        total += labels.size(0)
+        
+        loop.set_postfix(loss=loss.item(), acc=correct/total)
+        
+    return running_loss / len(loader), correct / total
 
-    return total_loss / len(loader)
+def validate(model, loader, device):
+    model.eval()
+    correct = 0
+    total = 0
+    running_loss = 0.0
+    
+    with torch.no_grad():
+        for images, labels, _ in loader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            loss = F.cross_entropy(outputs, labels)
+            running_loss += loss.item()
+            _, preds = torch.max(outputs, 1)
+            correct += (preds == labels).sum().item()
+            total += labels.size(0)
+            
+    return running_loss / len(loader), correct / total
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--noisy_csv", type=str, required=True)
-    parser.add_argument("--clean_csv", type=str, required=True)
+    parser.add_argument("--csv_train", type=str, required=True)
     parser.add_argument("--image_dir", type=str, required=True)
-    parser.add_argument("--output_dir", type=str, default="experiments/Phase6_Refinement")
+    parser.add_argument("--checkpoint", type=str, required=True, help="Path to Phase 7 model")
+    parser.add_argument("--output_dir", type=str, default="experiments/Phase8_Refinement")
     parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--debug", action="store_true", help="Run in fast debug mode (1000 samples)")
+    parser.add_argument("--lr", type=float, default=1e-5) # Low LR for fine-tuning
     args = parser.parse_args()
 
-    seed_everything(42)
+    set_seed(42)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(args.output_dir, exist_ok=True)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f" running on Device: {device}")
-
-    # OPTIMIZATION: Small images for CPU speed
-    img_size = 128 if device == "cpu" else 224
-    transform = transforms.Compose([
-        transforms.Resize((img_size, img_size)), 
-        transforms.ToTensor(), 
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ])
     
-    full_df = pd.read_csv(args.noisy_csv)
-    
-    # --- DEBUG MODE (Crucial for CPU) ---
-    if args.debug:
-        print(" DEBUG MODE ACTIVE: Training on random 1000 samples only.")
-        full_df = full_df.sample(1000).reset_index(drop=True)
+    print(f"🚀 Phase 8: Refinement starting from {args.checkpoint}")
 
-    dataset = HAM10000Dataset(full_df, args.image_dir, transform=transform)
-    loader = DataLoader(dataset, batch_size=16, shuffle=True) 
+    # 1. Load Data
+    train_dataset = HAM10000Dataset(args.csv_train, args.image_dir, transform="train")
+    val_dataset = HAM10000Dataset("data/splits/val_fold_0.csv", args.image_dir, transform="val")
     
-    # Load Clean IDs and strip whitespace
-    clean_df = pd.read_csv(args.clean_csv)
-    clean_ids = set(clean_df['image_id'].astype(str).str.strip().values)
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=2)
+    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=2)
+
+    # 2. Initialize Student (Load Phase 7 weights)
+    student = get_backbone("resnet50", num_classes=7).to(device)
+    checkpoint = torch.load(args.checkpoint, map_location=device)
     
-    # OPTIMIZATION: Use ResNet18 for CPU
-    model_name = "resnet18" if device == "cpu" else "resnet50"
-    print(f" Model: {model_name} | Samples: {len(full_df)}")
+    # Handle state dict keys if needed
+    state_dict = checkpoint
+    if 'model_state_dict' in checkpoint:
+        state_dict = checkpoint['model_state_dict']
+    
+    new_state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+    student.load_state_dict(new_state_dict, strict=False)
 
-    student = get_model(model_name, num_classes=7).to(device)
-    teacher_ema = EMA(student, decay=TEACHER_DECAY)
-    optimizer = optim.AdamW(student.parameters(), lr=1e-4)
-
-    print(" Starting Phase 6: Adaptive Refinement...")
-    for epoch in range(args.epochs):
-        loss = train_one_epoch(student, teacher_ema, loader, optimizer, clean_ids, device)
-        print(f"Epoch {epoch+1}/{args.epochs} | Loss: {loss:.4f}")
+    # 3. Initialize Teacher (Copy of Student)
+    teacher = copy.deepcopy(student)
+    teacher.eval() # Teacher is always eval
+    for param in teacher.parameters():
+        param.requires_grad = False # Teacher does not learn via gradient
         
-    torch.save(student.state_dict(), os.path.join(args.output_dir, "refinement_final.pth"))
-    print(" Phase 6 Refinement Complete.")
+    # 4. Setup EMA
+    ema = EMA(teacher, decay=0.99)
+    ema.register()
+
+    optimizer = optim.Adam(student.parameters(), lr=args.lr)
+    
+    best_acc = 0.0
+
+    # 5. Training Loop
+    for epoch in range(args.epochs):
+        print(f"\n--- Epoch {epoch+1}/{args.epochs} ---")
+        
+        train_loss, train_acc = train_one_epoch(student, teacher, ema, train_loader, optimizer, device)
+        val_loss, val_acc = validate(student, val_loader, device)
+        
+        print(f"Train Loss: {train_loss:.4f} | Acc: {train_acc:.4f}")
+        print(f"Val Loss: {val_loss:.4f} | Acc: {val_acc:.4f}")
+        
+        # Save Best Student
+        if val_acc > best_acc:
+            best_acc = val_acc
+            save_path = os.path.join(args.output_dir, "best_model_refinement.pth")
+            torch.save(student.state_dict(), save_path)
+            print(f"🌟 New Best Model Saved! ({val_acc:.4f})")
+
+    print(f"\n✅ Phase 8 Complete. Best Accuracy: {best_acc:.4f}")
 
 if __name__ == "__main__":
     main()
