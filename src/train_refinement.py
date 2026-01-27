@@ -12,7 +12,7 @@ import copy
 from dataset import HAM10000Dataset
 from models import get_model
 from ema import EMA
-from utils import set_seed
+from utils import seed_everything
 
 def train_one_epoch(student, teacher, ema, loader, optimizer, device, consistency_weight=0.1):
     student.train()
@@ -92,7 +92,7 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-5) # Low LR for fine-tuning
     args = parser.parse_args()
 
-    set_seed(42)
+    seed_everything(42)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(args.output_dir, exist_ok=True)
     
