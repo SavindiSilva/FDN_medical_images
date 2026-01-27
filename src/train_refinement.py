@@ -125,13 +125,13 @@ def main():
     # 1. Load Data with ACTUAL Transforms (Not Strings)
     train_dataset = HAM10000Dataset(
         csv_file=args.csv_train, 
-        root_dir=args.image_dir, 
+        image_dir=args.image_dir, 
         transform=get_transforms("train") # <--- FIXED HERE
     )
     
     val_dataset = HAM10000Dataset(
         csv_file="data/splits/val_fold_0.csv", 
-        root_dir=args.image_dir, 
+        image_dir=args.image_dir, 
         transform=get_transforms("val")   # <--- FIXED HERE
     )
     
