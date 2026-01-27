@@ -17,9 +17,6 @@ from src.utils import seed_everything
 
 # --- CONFIG FOR CURRICULUM ---
 SWITCH_EPOCH = 5  # When to switch from Easy -> Hard
-# "Dampened" Weights for Stage 2 (Calculated to be safe, not explosive)
-# Order: [nv, mel, bkl, bcc, akiec, vasc, df]
-# We give rare classes ~3x-5x boost, not 50x.
 STAGE_2_WEIGHTS = [0.5, 2.0, 1.5, 2.5, 4.0, 4.0, 4.0]
 
 def train_one_epoch(model, loader, criterion, optimizer, device, epoch_idx, phase_name):
@@ -74,8 +71,8 @@ def validate(model, loader, criterion, device):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--csv_warmup", type=str, required=True, help="Full dataset for stability")
-    parser.add_argument("--csv_finetune", type=str, required=True, help="Balanced dataset for precision")
+    parser.add_argument("--csv_warmup", type=str, required=True)
+    parser.add_argument("--csv_finetune", type=str, required=True)
     parser.add_argument("--image_dir", type=str, required=True)
     parser.add_argument("--output_dir", type=str, default="experiments/Phase7_Curriculum")
     args = parser.parse_args()
@@ -85,14 +82,13 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f" Curriculum Training on {device}...")
 
-    # --- TRANSFORMS (Added Light ColorJitter for Stage 2 Robustness) ---
-    # We will use one transform for simplicity, but you could swap these too.
+    # --- TRANSFORMS ---
     train_transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.RandomHorizontalFlip(),
         transforms.RandomVerticalFlip(),
-        transforms.RandomAffine(degrees=10, translate=(0.05, 0.05)), # Mild rotation
-        transforms.ColorJitter(brightness=0.1, contrast=0.1),       # Mild color noise
+        transforms.RandomAffine(degrees=10, translate=(0.05, 0.05)),
+        transforms.ColorJitter(brightness=0.1, contrast=0.1),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
@@ -118,22 +114,17 @@ def main():
     model.fc = nn.Linear(model.fc.in_features, 7)
     model = model.to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=1e-5) # Keep Low LR for safety
-
-    # --- LOSS FUNCTIONS ---
-    criterion_flat = nn.CrossEntropyLoss() # For Warmup
-    
-    # Weighted Loss for Finetune (Moves focus to rare classes)
+    optimizer = optim.Adam(model.parameters(), lr=1e-5)
+    criterion_flat = nn.CrossEntropyLoss()
     weights_tensor = torch.tensor(STAGE_2_WEIGHTS).float().to(device)
     criterion_weighted = nn.CrossEntropyLoss(weight=weights_tensor)
 
     best_mcc = -1.0
 
-    # --- TRAINING LOOP ---
-    for epoch in range(20):
-        print(f"\n--- Epoch {epoch+1}/20 ---")
+    # --- CHANGED TO 6 EPOCHS FOR RECOVERY ---
+    for epoch in range(6): 
+        print(f"\n--- Epoch {epoch+1}/6 ---")
         
-        # LOGIC: SWITCH CURRICULUM
         if epoch < SWITCH_EPOCH:
             phase = "WARMUP (Full Data)"
             loader = loader_warmup
@@ -142,12 +133,11 @@ def main():
             phase = "FINETUNE (Sieve + Weighted)"
             loader = loader_finetune
             criterion = criterion_weighted
-            
             if epoch == SWITCH_EPOCH:
                 print("🔀 SWITCHING GEARS: Activating Sieve Data & Class Weights!")
 
         train_loss, train_acc = train_one_epoch(model, loader, criterion, optimizer, device, epoch, phase)
-        val_loss, val_acc, val_mcc, val_f1 = validate(model, loader_val, criterion_flat, device) # Always validate with flat loss
+        val_loss, val_acc, val_mcc, val_f1 = validate(model, loader_val, criterion_flat, device)
 
         print(f"[{phase}] Train Loss: {train_loss:.4f} | Acc: {train_acc:.4f}")
         print(f"Val Loss: {val_loss:.4f} | Acc: {val_acc:.4f} | MCC: {val_mcc:.4f} | F1: {val_f1:.4f}")
