@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from torchvision import transforms
 from tqdm import tqdm
 import os
 import argparse
@@ -14,7 +15,30 @@ from models import get_model
 from ema import EMA
 from utils import seed_everything
 
-def train_one_epoch(student, teacher, ema, loader, optimizer, device, consistency_weight=0.1):
+def get_transforms(mode="train"):
+    """
+    Define standard transforms for ResNet50 (224x224).
+    """
+    norm = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    
+    if mode == "train":
+        return transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomVerticalFlip(),
+            transforms.RandomRotation(20),
+            transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
+            transforms.ToTensor(),
+            norm
+        ])
+    else:
+        return transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            norm
+        ])
+
+def train_one_epoch(student, teacher, ema, loader, optimizer, device, consistency_weight=1.0):
     student.train()
     teacher.eval() # Teacher is always in eval mode
     
@@ -98,9 +122,18 @@ def main():
     
     print(f"🚀 Phase 8: Refinement starting from {args.checkpoint}")
 
-    # 1. Load Data
-    train_dataset = HAM10000Dataset(args.csv_train, args.image_dir, transform="train")
-    val_dataset = HAM10000Dataset("data/splits/val_fold_0.csv", args.image_dir, transform="val")
+    # 1. Load Data with ACTUAL Transforms (Not Strings)
+    train_dataset = HAM10000Dataset(
+        csv_file=args.csv_train, 
+        root_dir=args.image_dir, 
+        transform=get_transforms("train") # <--- FIXED HERE
+    )
+    
+    val_dataset = HAM10000Dataset(
+        csv_file="data/splits/val_fold_0.csv", 
+        root_dir=args.image_dir, 
+        transform=get_transforms("val")   # <--- FIXED HERE
+    )
     
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=2)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=2)
@@ -109,19 +142,20 @@ def main():
     student = get_model("resnet50", num_classes=7).to(device)
     checkpoint = torch.load(args.checkpoint, map_location=device)
     
-    # Handle state dict keys if needed
+    # Handle state dict keys
     state_dict = checkpoint
     if 'model_state_dict' in checkpoint:
         state_dict = checkpoint['model_state_dict']
     
+    # Clean keys
     new_state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     student.load_state_dict(new_state_dict, strict=False)
 
     # 3. Initialize Teacher (Copy of Student)
     teacher = copy.deepcopy(student)
-    teacher.eval() # Teacher is always eval
+    teacher.eval()
     for param in teacher.parameters():
-        param.requires_grad = False # Teacher does not learn via gradient
+        param.requires_grad = False 
         
     # 4. Setup EMA
     ema = EMA(teacher, decay=0.99)
