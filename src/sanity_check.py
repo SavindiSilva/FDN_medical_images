@@ -8,7 +8,7 @@ import numpy as np
 import sys
 import os
 
-# --- CRITICAL CONFIG CHANGE ---
+
 # We are changing this to point to the folder you just created
 IMG_DIR = "/content/final_images" 
 CSV_FILE = "data/splits/train_phase6_final.csv"
@@ -47,7 +47,7 @@ def main():
 
     images, labels = images.to(DEVICE), labels.to(DEVICE)
     
-    print(f"\n📊 Batch Stats:")
+    print(f"\nBatch Stats:")
     print(f"   Min Pixel Value: {images.min().item():.3f} (Should be ~ -2.0)")
     print(f"   Max Pixel Value: {images.max().item():.3f} (Should be > 2.0)")
     

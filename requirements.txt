@@ -11,3 +11,4 @@ tqdm
 pyyaml
 albumentations
 wandb
+streamlit

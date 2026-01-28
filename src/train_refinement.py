@@ -120,19 +120,19 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(args.output_dir, exist_ok=True)
     
-    print(f"🚀 Phase 8: Refinement starting from {args.checkpoint}")
+    print(f" Phase 8: Refinement starting from {args.checkpoint}")
 
     # 1. Load Data with ACTUAL Transforms (Not Strings)
     train_dataset = HAM10000Dataset(
         csv_file=args.csv_train, 
         image_dir=args.image_dir, 
-        transform=get_transforms("train") # <--- FIXED HERE
+        transform=get_transforms("train") 
     )
     
     val_dataset = HAM10000Dataset(
         csv_file="data/splits/val_fold_0.csv", 
         image_dir=args.image_dir, 
-        transform=get_transforms("val")   # <--- FIXED HERE
+        transform=get_transforms("val")   
     )
     
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=2)
@@ -182,7 +182,7 @@ def main():
             torch.save(student.state_dict(), save_path)
             print(f"🌟 New Best Model Saved! ({val_acc:.4f})")
 
-    print(f"\n✅ Phase 8 Complete. Best Accuracy: {best_acc:.4f}")
+    print(f"\nPhase 8 Complete. Best Accuracy: {best_acc:.4f}")
 
 if __name__ == "__main__":
     main()
