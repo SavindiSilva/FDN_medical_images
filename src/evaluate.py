@@ -10,8 +10,7 @@ from torchvision import transforms, models
 from torch.utils.data import DataLoader
 from dataset import HAM10000Dataset
 
-# --- CONFIG UPDATE ---
-# Pointing to the Phase 7 Curriculum Model
+#pointing to the Phase 7 Curriculum Model
 MODEL_PATH = "experiments/Phase7_Curriculum/best_model_curriculum.pth"
 IMG_DIR = "/content/final_images"
 VAL_CSV = "data/splits/val_fold_0.csv"
@@ -24,7 +23,7 @@ def evaluate():
         print(" Error: Model file not found. Did Phase 7 finish saving?")
         return
 
-    # 1. Load Data
+    #Load Data
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
@@ -34,17 +33,17 @@ def evaluate():
     val_dataset = HAM10000Dataset(VAL_CSV, IMG_DIR, transform=transform)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
     
-    # 2. Load Model Structure
+    #Load Model Structure
     model = models.resnet50(weights=None) 
     model.fc = nn.Linear(model.fc.in_features, 7)
     
-    # 3. Load Trained Weights
+    #Load Trained Weights
     state_dict = torch.load(MODEL_PATH, map_location=DEVICE)
     model.load_state_dict(state_dict)
     model = model.to(DEVICE)
     model.eval()
     
-    # 4. Get Predictions
+    #Get Predictions
     all_preds = []
     all_labels = []
     
@@ -58,7 +57,7 @@ def evaluate():
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
 
-    # 5. Generate Report
+    #Generate Report
     classes = ['nv', 'mel', 'bkl', 'bcc', 'akiec', 'vasc', 'df']
     
     print("\n Classification Report (Phase 7 - Curriculum):\n")

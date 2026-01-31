@@ -10,48 +10,46 @@ import seaborn as sns
 import os
 import sys
 
-# Add src to path
 sys.path.append('src')
 
 from dataset import HAM10000Dataset, get_transforms
 from models import get_model
 
-# ================= CONFIGURATION =================
-# INPUTS
+#configuration
+#inputs
 MODEL_PATH = "/content/drive/My Drive/experiments/diagnostic_prototype_SAVED/checkpoint_epoch_8.pth"
 INPUT_CSV = "/content/drive/My Drive/backbone_selection/train_idn_20.csv"
 IMAGE_DIR = "/content/data/images"
 
-# OUTPUTS
+#outputs
 OUTPUT_CSV = "/content/drive/My Drive/backbone_selection/train_sieved_20.csv"
 PLOT_PATH = "/content/drive/My Drive/backbone_selection/sieve_plot.png"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Safety Cap: Never remove more than X% of ANY single class
+#no more than 35% of images in a single class can be removed
 MAX_REMOVE_RATIO = 0.35 
-# =================================================
 
 def apply_sieve():
     print(f"Loading data from {INPUT_CSV}...")
     df = pd.read_csv(INPUT_CSV)
     
-    # Ensure numeric labels exist
+    #ensure numeric labels exist
     if 'label' not in df.columns:
-        # Map if necessary (assuming standard HAM10000 mapping)
+        #map if necessary 
         lesion_type_dict = {
             'nv': 0, 'mel': 1, 'bkl': 2, 'bcc': 3, 'akiec': 4, 'vasc': 5, 'df': 6
         }
         df['label'] = df['dx'].map(lesion_type_dict)
 
-    # Setup Dataset
+    #setup Dataset
     dataset = HAM10000Dataset(df, IMAGE_DIR, transform=get_transforms(phase='val'))
     loader = DataLoader(dataset, batch_size=64, shuffle=False, num_workers=2)
 
     print(f"Loading Model from {MODEL_PATH}...")
     model = get_model(model_name='resnet50', num_classes=7).to(DEVICE)
     
-    # Load Weights
+    #load Weights
     checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
     if 'state_dict' in checkpoint:
         model.load_state_dict(checkpoint['state_dict'])
@@ -61,7 +59,7 @@ def apply_sieve():
     model.eval()
     criterion = nn.CrossEntropyLoss(reduction='none')
 
-    # 1. Calculate Losses
+    #calculate Losses
     print("Calculating losses...")
     all_losses = []
     
@@ -79,43 +77,42 @@ def apply_sieve():
 
     df['loss'] = np.array(all_losses)
     
-    # 2. Fit GMM (Global fit is fine to define "what is high loss")
+    #fit GMM 
     print("Fitting Global GMM...")
     gmm = GaussianMixture(n_components=2, random_state=42)
     loss_reshape = df['loss'].values.reshape(-1, 1)
     gmm.fit(loss_reshape)
     
-    # Identify Noisy Component (Higher Mean)
+    #identify Noisy Component (Higher Mean)
     noisy_component = np.argmax(gmm.means_)
     probs = gmm.predict_proba(loss_reshape)
     df['noisy_prob'] = probs[:, noisy_component]
 
-    # 3. STRATIFIED FILTERING (The Fix)
-    print("\n--- Applying Stratified Sieve (Per Class) ---")
+    #STRATIFIED FILTERING 
+    print("\n Applying Stratified Sieve (Per Class)")
     keep_mask = np.zeros(len(df), dtype=bool)
     
     classes = df['label'].unique()
     classes.sort()
     
     for cls in classes:
-        # Get data for this class
+        #get data for this class
         cls_indices = df[df['label'] == cls].index.to_numpy()
         cls_probs = df.loc[cls_indices, 'noisy_prob'].values
         
         n_total = len(cls_indices)
         n_allowed_remove = int(n_total * MAX_REMOVE_RATIO)
         
-        # Sort this class by "noisiness"
-        # We look at the indices relative to the class subset
-        sorted_local_indices = np.argsort(cls_probs)[::-1] # Highest prob first
+        #sort this class by "noisiness"
+        sorted_local_indices = np.argsort(cls_probs)[::-1] #highest prob first
         
-        # Determine how many are actually "suspect" (prob > 0.5)
+        #determine how many are actually "suspect" (prob > 0.5)
         n_suspects = np.sum(cls_probs > 0.5)
         
-        # We remove the minimum of (Actual Suspects, Allowed Cap)
+        #remove the minimum of (Actual Suspects, Allowed Cap)
         n_remove = min(n_suspects, n_allowed_remove)
         
-        # Identify indices to remove for this class
+        #identify indices to remove for this class
         remove_local_indices = sorted_local_indices[:n_remove]
         
         # Mark these in the global mask
@@ -132,8 +129,8 @@ def apply_sieve():
     df_clean = df[keep_mask].copy()
     df_suspect = df[~keep_mask].copy()
 
-    # 4. Save
-    print(f"\n--- SIEVE COMPLETE ---")
+    #Save
+    print(f"\nSIEVE COMPLETE")
     print(f"Original: {len(df)}")
     print(f"Clean:    {len(df_clean)} ({len(df_clean)/len(df):.1%})")
     print(f"Removed:  {len(df_suspect)} ({len(df_suspect)/len(df):.1%})")
@@ -142,7 +139,7 @@ def apply_sieve():
     df_clean.to_csv(OUTPUT_CSV, index=False)
     print(f"Saved to: {OUTPUT_CSV}")
 
-    # Plot
+    #plot
     plt.figure(figsize=(10, 6))
     sns.histplot(df.loc[keep_mask, 'loss'], color='green', label='Kept', kde=True, bins=50)
     sns.histplot(df.loc[~keep_mask, 'loss'], color='red', label='Removed', kde=True, bins=50)

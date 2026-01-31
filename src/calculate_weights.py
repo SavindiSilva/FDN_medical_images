@@ -4,10 +4,7 @@ import pandas as pd
 import numpy as np
 from sklearn.utils.class_weight import compute_class_weight
 
-# Add project root to path
 sys.path.append(os.getcwd())
-
-from src.utils import load_config
 
 def main():
     print("calculating class weights")

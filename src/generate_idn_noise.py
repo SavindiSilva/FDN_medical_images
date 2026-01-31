@@ -10,7 +10,6 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-#add project root to path
 sys.path.append(os.getcwd())
 
 from src.dataset import HAM10000Dataset
@@ -19,9 +18,8 @@ from src.utils import load_config, seed_everything
 
 def train_proxy(model, loader, device, epochs=5):
     """
-    task 2.1
     trains a lightweight proxy model (ResNet18) quickly
-    don't need a perfect model; we need one that learns 'easy' features
+    don't need a perfect model; need one that learns 'easy' features
     so it gets confused by 'hard' features
     """
     criterion = nn.CrossEntropyLoss()
@@ -50,7 +48,6 @@ def train_proxy(model, loader, device, epochs=5):
 
 def calculate_entropy(model, loader, device):
     """
-    task 2.2 2.3
     calculates entropy (uncertainty) for every image
     high entropy = model is confused = hard sample (candidate for noise)
     """
@@ -78,7 +75,6 @@ def calculate_entropy(model, loader, device):
 
 def generate_noise(df, indices, entropies, noise_rate, output_path):
     """
-    task 2.5 2.7
     selects top X% hardest images and flips their labels
     """
     print(f"\n[noise] generating {int(noise_rate*100)}% IDN Noise")

@@ -9,7 +9,7 @@ import os
 import argparse
 import copy
 
-# Import your modules
+# Import modules
 from dataset import HAM10000Dataset
 from models import get_model
 from ema import EMA
@@ -51,17 +51,17 @@ def train_one_epoch(student, teacher, ema, loader, optimizer, device, consistenc
     for images, labels, _ in loop:
         images, labels = images.to(device), labels.to(device)
         
-        # 1. Student Forward Pass
+        #Student Forward Pass
         student_logits = student(images)
         
-        # 2. Teacher Forward Pass (No Grad)
+        #Teacher Forward Pass (No Grad)
         with torch.no_grad():
             teacher.logits = teacher(images)
             
-        # 3. Supervised Loss (Student vs Real Labels)
+        #Supervised Loss (Student vs Real Labels)
         cls_loss = F.cross_entropy(student_logits, labels)
         
-        # 4. Consistency Loss (Student vs Teacher)
+        #Consistency Loss (Student vs Teacher)
         # KL Divergence: aligns student probability distribution with teacher's
         student_log_softmax = F.log_softmax(student_logits, dim=1)
         teacher_softmax = F.softmax(teacher.logits, dim=1)
@@ -122,7 +122,7 @@ def main():
     
     print(f" Phase 8: Refinement starting from {args.checkpoint}")
 
-    # 1. Load Data with ACTUAL Transforms (Not Strings)
+    #Load Data with ACTUAL Transforms (Not Strings)
     train_dataset = HAM10000Dataset(
         csv_file=args.csv_train, 
         image_dir=args.image_dir, 
@@ -138,7 +138,7 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=2)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=2)
 
-    # 2. Initialize Student (Load Phase 7 weights)
+    # Initialize Student (Load Phase 7 weights)
     student = get_model("resnet50", num_classes=7).to(device)
     checkpoint = torch.load(args.checkpoint, map_location=device)
     
@@ -151,13 +151,13 @@ def main():
     new_state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     student.load_state_dict(new_state_dict, strict=False)
 
-    # 3. Initialize Teacher (Copy of Student)
+    #Initialize Teacher (Copy of Student)
     teacher = copy.deepcopy(student)
     teacher.eval()
     for param in teacher.parameters():
         param.requires_grad = False 
         
-    # 4. Setup EMA
+    #Setup EMA
     ema = EMA(teacher, decay=0.99)
     ema.register()
 

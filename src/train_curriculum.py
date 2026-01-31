@@ -15,7 +15,6 @@ sys.path.append(os.getcwd())
 from src.dataset import HAM10000Dataset
 from src.utils import seed_everything
 
-# --- CONFIG FOR CURRICULUM ---
 SWITCH_EPOCH = 5  # When to switch from Easy -> Hard
 STAGE_2_WEIGHTS = [0.5, 2.0, 1.5, 2.5, 4.0, 4.0, 4.0]
 

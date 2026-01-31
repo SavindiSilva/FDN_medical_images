@@ -8,8 +8,6 @@ import numpy as np
 import sys
 import os
 
-
-# We are changing this to point to the folder you just created
 IMG_DIR = "/content/final_images" 
 CSV_FILE = "data/splits/train_phase6_final.csv"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -18,7 +16,6 @@ def main():
     print(f" RUNNING SANITY CHECK...")
     print(f"   Looking for images in: {IMG_DIR}")
     
-    # Check if folder exists and is not empty
     if not os.path.exists(IMG_DIR):
         print(" ERROR: The folder /content/final_images does not exist!")
         return
@@ -29,7 +26,7 @@ def main():
         print(" ERROR: The folder is empty!")
         return
 
-    # 1. Setup Data
+    #Setup Data
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
@@ -39,7 +36,7 @@ def main():
     try:
         dataset = HAM10000Dataset(CSV_FILE, IMG_DIR, transform=transform)
         loader = DataLoader(dataset, batch_size=8, shuffle=True)
-        # 2. Grab ONE batch
+        #Grab ONE batch
         images, labels, _ = next(iter(loader))
     except Exception as e:
         print(f" Error loading data: {e}")
@@ -51,12 +48,12 @@ def main():
     print(f"   Min Pixel Value: {images.min().item():.3f} (Should be ~ -2.0)")
     print(f"   Max Pixel Value: {images.max().item():.3f} (Should be > 2.0)")
     
-    # If Max is negative, we are still loading black squares
+    #If Max is negative, we are still loading black squares
     if images.max().item() < 0:
         print(" CRITICAL: Max pixel value is negative. Images are still loading as black squares!")
         return
 
-    # 3. Setup Model
+    #Setup Model
     model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
     model.fc = nn.Linear(model.fc.in_features, 7)
     model = model.to(DEVICE)
@@ -64,7 +61,7 @@ def main():
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     criterion = nn.CrossEntropyLoss()
     
-    # 4. The Loop
+    #The Loop
     print("\n Attempting to overfit one batch...")
     model.train()
     

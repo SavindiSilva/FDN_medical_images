@@ -11,7 +11,6 @@ from sklearn.metrics import accuracy_score, matthews_corrcoef, f1_score
 from torch.utils.data import DataLoader
 from torchvision import transforms, models
 
-# Add project root to path
 sys.path.append(os.getcwd())
 
 from src.dataset import HAM10000Dataset
@@ -84,12 +83,11 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f" Training on {device}...")
 
-    # --- DATA (Simplified Augmentation) ---
+    # --- DATA  ---
     train_transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.RandomHorizontalFlip(),
         transforms.RandomVerticalFlip(),
-        # Removed ColorJitter to make initial learning easier
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
@@ -106,7 +104,7 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=2)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
 
-    # --- MODEL (UNFROZEN) ---
+    # --- MODEL ---
     print(" Loading ResNet50 (Unfrozen)...")
     model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
     
@@ -115,7 +113,6 @@ def main():
     model = model.to(device)
 
     # --- LOSS & OPTIMIZER ---
-    # REMOVED Class Weights (Data is already balanced enough)
     criterion = nn.CrossEntropyLoss()
     
     # Very Low Learning Rate for stability

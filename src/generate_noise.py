@@ -3,7 +3,6 @@ import numpy as np
 import os
 import sys
 
-# Add project root to path
 sys.path.append(os.getcwd())
 from src.utils import load_config, seed_everything
 
@@ -12,7 +11,7 @@ def main():
     
     #setup
     config = load_config()
-    seed_everything(config['seed']) #CRITICAL: ensures the noise is exactly the same every time
+    seed_everything(config['seed']) #ensures the noise is exactly the same every time
     
     #load the clean training fold 0
     #we use fold 0 for the backbone screening
