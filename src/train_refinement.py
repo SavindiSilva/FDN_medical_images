@@ -8,12 +8,14 @@ from tqdm import tqdm
 import os
 import argparse
 import copy
+import numpy as np
 
 # Import modules
 from dataset import HAM10000Dataset
 from models import get_model
 from ema import EMA
 from utils import seed_everything
+from sklearn.metrics import matthews_corrcoef, f1_score
 
 def get_transforms(mode="train"):
     """
@@ -54,9 +56,11 @@ def train_one_epoch(student, teacher, ema, loader, optimizer, device, consistenc
         #Student Forward Pass
         student_logits = student(images)
         
-        #Teacher Forward Pass (No Grad)
+        # Teacher Forward Pass using EMA weights (No Grad)
         with torch.no_grad():
-            teacher.logits = teacher(images)
+            ema.apply_shadow()                 # put EMA weights onto teacher
+            teacher_logits = teacher(images)   # forward with EMA teacher
+            ema.restore()                      # restore teacher to original (optional but clean)
             
         #Supervised Loss (Student vs Real Labels)
         cls_loss = F.cross_entropy(student_logits, labels)
@@ -64,7 +68,7 @@ def train_one_epoch(student, teacher, ema, loader, optimizer, device, consistenc
         #Consistency Loss (Student vs Teacher)
         # KL Divergence: aligns student probability distribution with teacher's
         student_log_softmax = F.log_softmax(student_logits, dim=1)
-        teacher_softmax = F.softmax(teacher.logits, dim=1)
+        teacher_softmax = F.softmax(teacher_logits, dim=1)
         const_loss = F.kl_div(student_log_softmax, teacher_softmax, reduction='batchmean')
         
         # Total Loss
@@ -80,7 +84,7 @@ def train_one_epoch(student, teacher, ema, loader, optimizer, device, consistenc
         
         # Metrics
         running_loss += loss.item()
-        _, preds = torch.max(student_logits, 1)
+        preds = torch.argmax(student_logits, dim=1)
         correct += (preds == labels).sum().item()
         total += labels.size(0)
         
@@ -90,21 +94,30 @@ def train_one_epoch(student, teacher, ema, loader, optimizer, device, consistenc
 
 def validate(model, loader, device):
     model.eval()
-    correct = 0
-    total = 0
     running_loss = 0.0
-    
+
+    all_preds = []
+    all_labels = []
+
     with torch.no_grad():
         for images, labels, _ in loader:
             images, labels = images.to(device), labels.to(device)
             outputs = model(images)
             loss = F.cross_entropy(outputs, labels)
             running_loss += loss.item()
-            _, preds = torch.max(outputs, 1)
-            correct += (preds == labels).sum().item()
-            total += labels.size(0)
-            
-    return running_loss / len(loader), correct / total
+
+            preds = torch.argmax(outputs, dim=1)
+            all_preds.append(preds.detach().cpu().numpy())
+            all_labels.append(labels.detach().cpu().numpy())
+
+    all_preds = np.concatenate(all_preds)
+    all_labels = np.concatenate(all_labels)
+
+    acc = (all_preds == all_labels).mean()
+    mcc = matthews_corrcoef(all_labels, all_preds)
+    macro_f1 = f1_score(all_labels, all_preds, average="macro")
+
+    return running_loss / len(loader), acc, mcc, macro_f1
 
 def main():
     parser = argparse.ArgumentParser()
@@ -163,26 +176,26 @@ def main():
 
     optimizer = optim.Adam(student.parameters(), lr=args.lr)
     
-    best_acc = 0.0
+    best_mcc  = -1.0
 
     # 5. Training Loop
     for epoch in range(args.epochs):
         print(f"\n--- Epoch {epoch+1}/{args.epochs} ---")
         
         train_loss, train_acc = train_one_epoch(student, teacher, ema, train_loader, optimizer, device)
-        val_loss, val_acc = validate(student, val_loader, device)
+        val_loss, val_acc, val_mcc, val_f1 = validate(student, val_loader, device)
         
         print(f"Train Loss: {train_loss:.4f} | Acc: {train_acc:.4f}")
-        print(f"Val Loss: {val_loss:.4f} | Acc: {val_acc:.4f}")
+        print(f"Val Loss: {val_loss:.4f} | Acc: {val_acc:.4f} | MCC: {val_mcc:.4f} | Macro-F1: {val_f1:.4f}")
         
         # Save Best Student
-        if val_acc > best_acc:
-            best_acc = val_acc
-            save_path = os.path.join(args.output_dir, "best_model_refinement.pth")
+        if val_mcc > best_mcc:
+            best_mcc = val_mcc
+            save_path = os.path.join(args.output_dir, "new_best_model_refinement.pth")
             torch.save(student.state_dict(), save_path)
-            print(f"🌟 New Best Model Saved! ({val_acc:.4f})")
+            print(f"🌟 New Best Model Saved! ({val_mcc:.4f})")
 
-    print(f"\nPhase 8 Complete. Best Accuracy: {best_acc:.4f}")
+    print(f"\nPhase 8 Complete. Best MCC: {best_mcc:.4f}")
 
 if __name__ == "__main__":
     main()
