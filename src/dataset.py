@@ -1,5 +1,4 @@
 import os
-import torch
 import pandas as pd
 from PIL import Image
 from torch.utils.data import Dataset
@@ -10,29 +9,35 @@ class HAM10000Dataset(Dataset):
         self.image_dir = image_dir
         self.transform = transform
 
+        # map HAM10000 dx to numeric labels
+        self.label_map = {'nv': 0, 'mel': 1, 'bkl': 2, 'bcc': 3, 'akiec': 4, 'vasc': 5, 'df': 6}
+
     def __len__(self):
         return len(self.df)
 
     def __getitem__(self, idx):
-        #Get Image ID and Label
-        img_id = self.df.iloc[idx]['image_id']
-        label = int(self.df.iloc[idx]['label'])
-        
-        #Construct Path (Handle missing .jpg extension if needed)
+        row = self.df.iloc[idx]
+
+        # image id
+        img_id = row["image_id"]  # your CSV has this
+
+        # label: use numeric label if exists, else map from dx
+        if "label" in self.df.columns:
+            label = int(row["label"])
+        elif "dx" in self.df.columns:
+            label = int(self.label_map[row["dx"]])
+        else:
+            raise KeyError("CSV must contain 'label' or 'dx' column")
+
         img_path = os.path.join(self.image_dir, f"{img_id}.jpg")
-        
-        # Load Image 
+
         try:
             image = Image.open(img_path).convert("RGB")
         except (FileNotFoundError, OSError):
-            #create a black square if file missing
-            print(f" WARNING: Could not find image {img_path}")
-            image = Image.new('RGB', (224, 224), color='black')
+            print(f"WARNING: Could not find image {img_path}")
+            image = Image.new("RGB", (224, 224), color="black")
 
-        #Apply Transforms
         if self.transform:
             image = self.transform(image)
-        
-        #Return (Image, Label, ID)
-        #return ID too, just in case we need to debug which image failed
+
         return image, label, img_id
