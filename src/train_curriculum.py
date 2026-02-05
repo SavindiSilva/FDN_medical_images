@@ -16,6 +16,7 @@ from src.dataset import HAM10000Dataset
 from src.utils import seed_everything
 
 SWITCH_EPOCH = 5  # When to switch from Easy -> Hard
+# STAGE_2_WEIGHTS = [0.5, 2.0, 1.5, 2.5, 4.0, 4.0, 4.0]
 STAGE_2_WEIGHTS = [0.5, 2.0, 1.5, 2.5, 4.0, 4.0, 4.0]
 
 def train_one_epoch(model, loader, criterion, optimizer, device, epoch_idx, phase_name):
@@ -115,7 +116,8 @@ def main():
 
     optimizer = optim.Adam(model.parameters(), lr=1e-5)
     criterion_flat = nn.CrossEntropyLoss()
-    weights_tensor = torch.tensor(STAGE_2_WEIGHTS).float().to(device)
+    # weights_tensor = torch.tensor(STAGE_2_WEIGHTS).float().to(device)
+    weights_tensor = torch.tensor(STAGE_2_WEIGHTS, dtype=torch.float).to(device)
     criterion_weighted = nn.CrossEntropyLoss(weight=weights_tensor)
 
     best_mcc = -1.0

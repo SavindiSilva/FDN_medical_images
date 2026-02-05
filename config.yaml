@@ -34,4 +34,6 @@ training:
   normalize_std: [0.229, 0.224, 0.225]
 
   #calculated wights
-  class_weights: [4.3848, 2.7845, 1.3020, 12.4394, 1.2844, 0.2134, 10.1277]
+  #class weights ordered as: nv, mel, bkl, bcc, akiec, vasc, df
+  class_weights: [0.2134, 1.2844, 1.3020, 2.7845, 4.3848, 10.1277, 12.4394]
+
