@@ -11,4 +11,4 @@ tqdm
 pyyaml
 albumentations
 wandb
-streamlit
+streamlit>=1.30
