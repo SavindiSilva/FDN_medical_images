@@ -2,6 +2,10 @@
 data/*
 #but keep these specific subfolders
 !data/splits/
+
+# allow models
+models/
+
 results/
 venv/
 __pycache__/
