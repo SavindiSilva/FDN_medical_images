@@ -1,0 +1,14 @@
+{
+  "backbone": "efficientnet_b0",
+  "dropout": 0.5,
+  "num_classes": 7,
+  "class_names": [
+    "Melanocytic Nevus (nv)",
+    "Melanoma (mel)",
+    "Benign Keratosis (bkl)",
+    "Basal Cell Carcinoma (bcc)",
+    "Actinic Keratosis (akiec)",
+    "Vascular Lesion (vasc)",
+    "Dermatofibroma (df)"
+  ]
+}

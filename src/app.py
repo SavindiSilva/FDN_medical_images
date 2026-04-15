@@ -1,210 +1,397 @@
+import os
+import json
+from typing import Dict, List, Tuple
+
 import streamlit as st
 import torch
 import torch.nn as nn
-from torchvision import models, transforms
+import torch.nn.functional as F
 from PIL import Image
-import time
-import os
+from torchvision import transforms
+import timm
 
-#page configuration
+class NoiseRobustSkinModel(nn.Module):
+    def __init__(self, backbone_name, num_classes=7, dropout=0.5, pretrained=False):
+        super().__init__()
+        self.backbone_name = backbone_name
+
+        self.backbone = timm.create_model(
+            backbone_name,
+            pretrained=pretrained,
+            num_classes=0
+        )
+
+        if hasattr(self.backbone, "num_features"):
+            in_features = self.backbone.num_features
+        else:
+            in_features = self.backbone.get_classifier().in_features
+
+        self.head = nn.Sequential(
+            nn.Linear(in_features, 512),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(512, num_classes)
+        )
+
+    def forward(self, x, return_features=False):
+        feats = self.backbone(x)
+        out = self.head(feats)
+        if return_features:
+            return out, feats
+        return out
+
+# =============================
+# Page configuration
+# =============================
 st.set_page_config(
-    page_title="RefineMed | Skin Lesion Analysis",
-    page_icon="🔍",
+    page_title="RefineMed | Research Prototype",
+    page_icon="🔬",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-#styling
-st.markdown("""
+# =============================
+# Styling
+# =============================
+st.markdown(
+    """
     <style>
-    .main { background-color: #f8f9fa; }
-    .stButton>button {
+    .main {
+        background-color: #f8f9fa;
+    }
+    .block-container {
+        padding-top: 1.6rem;
+        padding-bottom: 1.6rem;
+    }
+    .stButton > button {
         width: 100%;
-        background-color: #4CAF50; 
-        color: white; 
-        font-weight: bold;
         border-radius: 10px;
-        height: 50px;
+        height: 46px;
         border: none;
+        font-weight: 600;
     }
-    .stButton>button:hover { background-color: #45a049; }
-    .metric-card {
+    .card {
         background-color: white;
-        padding: 30px;
-        border-radius: 15px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        text-align: center;
-        border: 1px solid #e0e0e0;
+        padding: 20px;
+        border-radius: 14px;
+        border: 1px solid #e5e7eb;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        margin-bottom: 16px;
     }
-    h1, h2, h3 { color: #2c3e50; font-family: 'Segoe UI', sans-serif; }
+    .muted {
+        color: #6b7280;
+        font-size: 0.95rem;
+    }
+    .small-title {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #374151;
+        margin-bottom: 8px;
+    }
+    .pred-label {
+        font-size: 1.4rem;
+        font-weight: 700;
+        color: #111827;
+        margin-bottom: 4px;
+    }
+    .pred-score {
+        font-size: 2rem;
+        font-weight: 800;
+        color: #0f766e;
+    }
     </style>
-    """, unsafe_allow_html=True)
-
-#configuration
-NUM_CLASSES = 7
-
-#finds experiments folder relative to this script file
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
-#point to the refinement model
-# MODEL_PATH = os.path.join(
-#     BASE_DIR,
-#     "data",
-#     "experiments",
-#     "Phase8_Refinement",
-#     "new_best_model_refinement.pth"
-# )
-
-PHASE8_DIR = os.path.join(BASE_DIR, "models", "phase8")
-MODEL_PATH = os.getenv(
-    "MODEL_PATH",
-    os.path.join(PHASE8_DIR, "new_best_model_refinement.pth")
+    """,
+    unsafe_allow_html=True,
 )
 
+# =============================
+# Configuration
+# =============================
+NUM_CLASSES = 7
+IMAGE_SIZE = 224
+DEFAULT_BACKBONE = os.getenv("MODEL_BACKBONE", "efficientnet_b0")
 
-#this mapping must match training code exactly!
-#0:nv, 1:mel, 2:bkl, 3:bcc, 4:akiec, 5:vasc, 6:df
-CLASSES = {
-    0: 'Melanocytic Nevus (Mole)',
-    1: 'Melanoma (High Risk)',
-    2: 'Benign Keratosis',
-    3: 'Basal Cell Carcinoma',
-    4: 'Actinic Keratosis',
-    5: 'Vascular Lesion',
-    6: 'Dermatofibroma'
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
+DEFAULT_MODEL_PATH = os.getenv("MODEL_PATH", os.path.join(MODELS_DIR, "rehab_adaptive_idn20_best.pth"))
+DEFAULT_CONFIG_PATH = os.getenv("MODEL_CONFIG_PATH", os.path.join(MODELS_DIR, "model_config.json"))
+
+CLASS_NAMES = {
+    0: "Actinic Keratosis (akiec)",
+    1: "Basal Cell Carcinoma (bcc)",
+    2: "Benign Keratosis (bkl)",
+    3: "Dermatofibroma (df)",
+    4: "Melanoma (mel)",
+    5: "Melanocytic Nevus (nv)",
+    6: "Vascular Lesion (vasc)",
 }
 
-#load model
+IMAGENET_MEAN = [0.485, 0.456, 0.406]
+IMAGENET_STD = [0.229, 0.224, 0.225]
+
+# =============================
+# Utility functions
+# =============================
+def load_optional_config(path: str) -> dict:
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def build_model(backbone: str, num_classes: int, dropout: float = 0.5):
+    return NoiseRobustSkinModel(
+        backbone_name=backbone,
+        num_classes=num_classes,
+        dropout=dropout,
+        pretrained=False
+    )
+
+
 @st.cache_resource
-def load_model():
-    if not os.path.exists(MODEL_PATH):
-        st.error("❌ Model file missing!")
-        st.code(f"Looked for:\n{MODEL_PATH}")
-        st.info("Place the .pth file in the Phase8_Refinement folder or set an environment variable MODEL_PATH.")
-        return None
+def load_model(model_path: str, config_path: str):
+    if not os.path.exists(model_path):
+        return None, None, f"Model file not found: {model_path}"
 
     device = torch.device("cpu")
+    cfg = load_optional_config(config_path)
 
-    model = models.resnet50(weights=None)
-    model.fc = nn.Linear(model.fc.in_features, NUM_CLASSES)
+    backbone = cfg.get("backbone", "efficientnet_b0")
+    dropout = float(cfg.get("dropout", 0.5))
+    num_classes = int(cfg.get("num_classes", 7))
 
-    state = torch.load(MODEL_PATH, map_location=device)
-    if isinstance(state, dict) and "model_state_dict" in state:
-        state = state["model_state_dict"]
+    model = build_model(backbone, num_classes, dropout)
 
-    state = {k.replace("module.", ""): v for k, v in state.items()}
-    model.load_state_dict(state, strict=False)
+    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+
+    if isinstance(checkpoint, dict):
+        if "model_state" in checkpoint:
+            state_dict = checkpoint["model_state"]
+        elif "model_state_dict" in checkpoint:
+            state_dict = checkpoint["model_state_dict"]
+        elif "state_dict" in checkpoint:
+            state_dict = checkpoint["state_dict"]
+        else:
+            state_dict = checkpoint
+    else:
+        state_dict = checkpoint
+
+    cleaned_state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+    missing, unexpected = model.load_state_dict(cleaned_state_dict, strict=False)
+
+    model.to(device)
+
+    if missing or unexpected:
+        print("Missing keys:", missing)
+        print("Unexpected keys:", unexpected)
 
     model.eval()
-    return model
 
-#sidebar
+    metadata = {
+        "backbone": backbone,
+        "dropout": dropout,
+        "num_classes": num_classes,
+        "device": str(device),
+        "missing_keys": missing,
+        "unexpected_keys": unexpected,
+    }
+
+    return model, metadata, None
+
+
+def get_inference_transform() -> transforms.Compose:
+    return transforms.Compose([
+        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+        transforms.ToTensor(),
+        transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+    ])
+
+
+def predict_image(model: nn.Module, image: Image.Image) -> Tuple[int, float, torch.Tensor, float]:
+    transform = get_inference_transform()
+    x = transform(image).unsqueeze(0)
+
+    with torch.no_grad():
+        logits = model(x)
+        probs = F.softmax(logits, dim=1)
+        entropy = -(probs * torch.log(probs.clamp(min=1e-8))).sum(dim=1)
+
+    top_prob, top_idx = probs.max(dim=1)
+    return int(top_idx.item()), float(top_prob.item()), probs.squeeze(0), float(entropy.item())
+
+
+def confidence_band(conf: float) -> Tuple[str, str]:
+    if conf >= 0.80:
+        return "High confidence", "The model output is relatively confident for this image."
+    if conf >= 0.60:
+        return "Moderate confidence", "The model output is moderately confident, but alternative classes may still be relevant."
+    return "Low confidence", "This image may be ambiguous, difficult, or outside the model's strongest decision boundary."
+
+
+def entropy_band(entropy_value: float, num_classes: int = NUM_CLASSES) -> Tuple[str, str]:
+    max_entropy = torch.log(torch.tensor(float(num_classes))).item()
+    ratio = entropy_value / max_entropy if max_entropy > 0 else 0.0
+
+    if ratio < 0.35:
+        return "Low ambiguity", "The probability distribution is fairly concentrated around one class."
+    if ratio < 0.60:
+        return "Moderate ambiguity", "The image shows some uncertainty across classes."
+    return "High ambiguity", "The model is uncertain and multiple classes receive meaningful probability mass."
+
+
+def format_topk(probabilities: torch.Tensor, k: int = 3) -> List[Tuple[str, float]]:
+    top_probs, top_indices = torch.topk(probabilities, k=k)
+    rows = []
+    for p, idx in zip(top_probs.tolist(), top_indices.tolist()):
+        rows.append((CLASS_NAMES.get(int(idx), f"Class {idx}"), float(p)))
+    return rows
+
+
+# =============================
+# Sidebar
+# =============================
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=100)
-    st.title("RefineMed Prototype")
-    
+    st.title("RefineMed")
+    st.caption("Research prototype")
+
     st.markdown("---")
-    st.write("This tool identifies 7 common skin lesions. It uses a **Sieve & Rehabilitate** framework to handle ambiguous (noisy) medical images.")
-    
-    st.markdown("### Performance")
-    #METRICS
-    st.write("✅ **Accuracy (Val):** ~80.8%")
-    st.write("✅ **MCC (Best):** 0.6214")
-    st.write("✅ **Macro-F1:** ~0.568")
+    st.markdown(
+        """
+        **Project focus**
+        - Skin lesion image classification
+        - Robust training under noisy annotations
+        - Confidence-aware research demonstration
+        """
+    )
+
     st.markdown("---")
-    st.caption("⚠️ For Research/Academic Use Only.")
+    st.markdown(
+        """
+        **Training context**
+        - Dataset: HAM10000
+        - Backbone: EfficientNet-B0
+        - Training idea: SIEVE + REHAB
+        - Evaluation metrics: Accuracy, Macro-F1, MCC
+        """
+    )
 
-#main layout
-st.title("🔍 AI-Powered Skin Lesion Analysis")
-st.markdown("### Clinical Support System")
-st.write("Upload a dermoscopic image below for instant classification.")
-
-col1, col2 = st.columns([1, 1], gap="large")
-
-# --- COLUMN 1: UPLOAD ---
-with col1:
-    st.subheader("1. Patient Skin Image")
-    uploaded_file = st.file_uploader("Upload Image (JPG/PNG)", type=["jpg", "png", "jpeg"])
-
-    if uploaded_file:
-        image = Image.open(uploaded_file).convert('RGB')
-        st.image(image, caption="Uploaded Scan", use_container_width=True)
-
-# --- COLUMN 2: RESULTS ---
-with col2:
-    st.subheader("2. Diagnostic Report")
-    
-    if uploaded_file:
-        # Load model only when needed
-        model = load_model()
-        
-        if st.button("🔍 Analyze Lesion"):
-            if model:
-                # Progress bar effect
-                progress_text = "Processing image..."
-                my_bar = st.progress(0, text=progress_text)
-
-                for percent_complete in range(100):
-                    time.sleep(0.01)
-                    my_bar.progress(percent_complete + 1, text=progress_text)
-                
-                my_bar.empty()
-
-                # Inference Transforms (Must match training)
-                transform = transforms.Compose([
-                    transforms.Resize((224, 224)),
-                    transforms.ToTensor(),
-                    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-                ])
-                img_tensor = transform(image).unsqueeze(0)
-
-                with torch.no_grad():
-                    outputs = model(img_tensor)
-                    probs = torch.nn.functional.softmax(outputs, dim=1)
-                    top_probs, top_classes = probs.topk(3, dim=1)
-
-                    # Primary prediction = top-1
-                    confidence = float(top_probs[0][0]) * 100
-                    class_idx = int(top_classes[0][0])
-                    pred_label = CLASSES.get(class_idx, "Unknown")
-
-                    st.write("Top predictions:")
-                    for p, c in zip(top_probs[0], top_classes[0]):
-                        st.write(f"- {CLASSES.get(int(c), 'Unknown')}: {float(p)*100:.1f}%")
-
-                    if confidence < 50:
-                        st.warning("⚠️ Low confidence prediction. Consider a clinical review or better image quality.")
+    st.markdown("---")
+    st.warning(
+        "This interface is for academic research demonstration only. It is not a diagnostic or clinical decision tool."
+    )
 
 
-                # --- DISPLAY RESULTS ---
-                st.markdown(f"""
-                <div class="metric-card">
-                    <h3 style="color: #555; margin-bottom: 5px;">Primary Detection</h3>
-                    <h2 style="color: #2c3e50; font-size: 28px; margin: 10px 0;">{pred_label}</h2>
-                    <h1 style="color: #27ae60; font-size: 48px; margin: 0;">{confidence:.1f}%</h1>
-                    <p style="color: #888;">Confidence Level</p>
-                </div>
-                """, unsafe_allow_html=True)
+# =============================
+# Main layout
+# =============================
+st.title("🔬 RefineMed: Robust Skin Lesion Classification")
+st.markdown(
+    "Demonstration interface for the final trained model. The noisy-annotation handling happens during training, while this UI shows the resulting prediction behavior, confidence, and ambiguity at inference time."
+)
 
-                st.markdown("---")
+model, metadata, load_error = load_model(DEFAULT_MODEL_PATH, DEFAULT_CONFIG_PATH)
 
-                # --- CLINICAL ALERTS ---
-                # 1 = Melanoma, 3 = BCC, 4 = AKIEC (Pre-cancerous)
-                if confidence < 65:
-                    st.warning("⚠️ Uncertain prediction. Please use a clearer dermoscopic image and seek clinical review.")
-                elif class_idx in [1, 3]:
-                    st.error("🚨 HIGH RISK ALERT: Possible malignancy. Immediate dermatological referral is recommended.")
-                elif class_idx == 4:
-                    st.warning("⚠️ CAUTION: Possible pre-cancerous growth (Actinic Keratosis). Clinical follow-up advised.")
-                else:
-                    st.success("✅ LOW RISK: The lesion appears benign. Standard monitoring protocols apply.")
+if load_error:
+    st.error(load_error)
+    st.info("Update MODEL_PATH and MODEL_CONFIG_PATH, or place the files inside the models folder.")
+    st.stop()
 
+if metadata["missing_keys"] or metadata["unexpected_keys"]:
+    st.warning("Checkpoint loaded with key mismatches. Please verify compatibility.")
+
+col_left, col_right = st.columns([1, 1], gap="large")
+
+with col_left:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="small-title">Input Image</div>', unsafe_allow_html=True)
+    uploaded_file = st.file_uploader("Upload a dermoscopic image", type=["jpg", "jpeg", "png"])
+
+    image = None
+    if uploaded_file is not None:
+        try:
+            image = Image.open(uploaded_file).convert("RGB")
+            st.image(image, caption="Uploaded image", use_container_width=True)
+        except Exception as e:
+            st.error(f"Could not open image: {e}")
+            image = None
     else:
-        # Placeholder State
-        st.info("👈 Please upload an image to begin analysis.")
-        st.markdown("""
-        <div style="border: 2px dashed #ccc; border-radius: 10px; padding: 40px; text-align: center; color: #ccc;">
-            <h3>Waiting for Image...</h3>
-            <p>Select a file from the panel on the left.</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.info("Upload a dermoscopic image to run the research prototype.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="small-title">Model Information</div>', unsafe_allow_html=True)
+    st.write(f"**Backbone:** {metadata['backbone']}")
+    st.write(f"**Dropout:** {metadata['dropout']}")
+    st.write("**Inference mode:** CPU")
+    st.write("**Class set:** akiec, bcc, bkl, df, mel, nv, vasc")
+    st.write(f"**Checkpoint:** {os.path.basename(DEFAULT_MODEL_PATH)}")
+    st.write(f"**Missing keys:** {metadata['missing_keys']}")
+    st.write(f"**Unexpected keys:** {metadata['unexpected_keys']}")
+    st.markdown('<div class="muted">The UI loads a saved checkpoint from the training pipeline and performs inference only.</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with col_right:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="small-title">Prediction Summary</div>', unsafe_allow_html=True)
+
+    if image is not None:
+        analyze = st.button("Analyze Image")
+    else:
+        analyze = False
+
+    if analyze and image is not None:
+        top_idx, top_conf, probs, entropy_value = predict_image(model, image)
+        pred_label = CLASS_NAMES.get(top_idx, f"Class {top_idx}")
+        conf_text, conf_note = confidence_band(top_conf)
+        ambiguity_text, ambiguity_note = entropy_band(entropy_value)
+        st.write(f"**Predicted class index:** {top_idx}")
+        st.write(f"**Raw probabilities:** {[round(float(p), 6) for p in probs.tolist()]}")
+
+        st.markdown(f'<div class="pred-label">{pred_label}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="pred-score">{top_conf * 100:.1f}%</div>', unsafe_allow_html=True)
+        st.progress(min(max(float(top_conf), 0.0), 1.0))
+
+        st.write(f"**Confidence category:** {conf_text}")
+        st.write(conf_note)
+        st.write(f"**Ambiguity estimate:** {ambiguity_text}")
+        st.write(ambiguity_note)
+
+        topk_rows = format_topk(probs, k=3)
+        st.markdown("### Top-3 Predictions")
+        for label, p in topk_rows:
+            st.write(f"- **{label}**: {p * 100:.1f}%")
+
+        st.markdown("### Interpretation Notes")
+        if top_conf < 0.60:
+            st.warning(
+                "Low-confidence output. The image may be difficult, ambiguous, or visually similar to other classes."
+            )
+        elif top_conf < 0.80:
+            st.info(
+                "Moderate-confidence output. Alternative classes should still be considered when interpreting the result."
+            )
+        else:
+            st.success(
+                "The model is relatively confident in this prediction for the uploaded image."
+            )
+
+        st.markdown("### Research Disclaimer")
+        st.caption(
+            "This result is generated by an academic research prototype trained on HAM10000. It should not be used for diagnosis, treatment, or clinical decision-making."
+        )
+    else:
+        st.info("Upload an image and click **Analyze Image** to view the model output.")
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown("---")
+st.markdown(
+    """
+    **How this relates to the project**
+
+    - The uploaded image is passed through the final trained classification model.
+    - The noisy-annotation handling does not happen inside the UI. It was performed during model training through the SIEVE + REHAB pipeline.
+    - This interface demonstrates the final inference behavior, including class probabilities, confidence, and ambiguity-aware output.
+    """
+)
