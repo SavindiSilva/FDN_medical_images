@@ -91,7 +91,7 @@ st.markdown(
     .pred-label {
         font-size: 1.4rem;
         font-weight: 700;
-        color: #111827;
+        color: #48536b;
         margin-bottom: 4px;
     }
     .pred-score {
